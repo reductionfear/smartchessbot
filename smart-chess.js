@@ -1027,7 +1027,7 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
             const flipped = isLichessBoardFlipped();
 
             // Use percentage-based positioning to match Lichess's native piece positioning
-            const SQUARE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
+            const SQUARE_PERCENT = 100 / 8; // Each square is 12.5% of the board
             let left_percent, top_percent;
 
             if (!flipped) {
