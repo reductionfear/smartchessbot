@@ -45,7 +45,10 @@ const MIN_MOVETIME = 50;
 const MAX_ELO = 3500;
 const DEPTH_MODE = 0;
 const MOVETIME_MODE = 1;
+const MATE_SCORE = 10000;  // Score value for checkmate positions
 const rank = ["Beginner", "Intermediate", "Advanced", "Expert", "Master", "Grand Master"];
+// Web engine IDs (incompatible with Lichess due to CSP)
+const WEB_ENGINE_IDS = [0, 1, 2]; // Lozza, Stockfish 5, Stockfish 2018
 
 
 
@@ -309,7 +312,8 @@ function getLichessCloudBestMoves(request) {
                 return;
             }
 
-            if (!response.response || response.response.includes("error") || response.status !== 200) {
+            // Check HTTP status code for error responses
+            if (!response.response || response.status !== 200) {
                 // Fallback to node server if cloud API fails
                 Interface.log('Lichess Cloud API unavailable, falling back to Node Server...');
                 getNodeBestMoves(request);
@@ -329,7 +333,7 @@ function getLichessCloudBestMoves(request) {
                 let bestPv = data.pvs[0];
                 let nextMove = bestPv.moves.split(' ')[0];
                 let depth = data.depth || current_depth;
-                let score = bestPv.cp !== undefined ? bestPv.cp : (bestPv.mate !== undefined ? (bestPv.mate > 0 ? 10000 : -10000) : 0);
+                let score = bestPv.cp !== undefined ? bestPv.cp : (bestPv.mate !== undefined ? (bestPv.mate > 0 ? MATE_SCORE : -MATE_SCORE) : 0);
 
                 // Extract additional best moves for highlighting
                 possible_moves = [];
@@ -343,7 +347,8 @@ function getLichessCloudBestMoves(request) {
                 Interface.updateBestMoveProgress(`Cloud Depth: ${depth}`);
                 Interface.engineLog("bestmove " + nextMove + " (Lichess Cloud, depth " + depth + ")");
 
-                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), score / 100, true);
+                // Use depth as power score for consistency with other engine methods
+                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), depth, true);
 
             } catch (e) {
                 Interface.log('Error parsing Lichess Cloud response: ' + e.message);
@@ -1937,7 +1942,8 @@ function openGUI() {
             }
 
             // Default to Lichess Cloud engine on Lichess.org if no saved preference or using web engine
-            if (engineIndex < node_engine_id) {
+            // Default to Lichess Cloud engine if currently using an incompatible web engine
+            if (WEB_ENGINE_IDS.includes(engineIndex)) {
                 engineIndex = lichess_cloud_engine_id;
                 GM_setValue(dbValues.engineIndex, engineIndex);
             }
