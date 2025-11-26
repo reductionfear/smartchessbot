@@ -1019,7 +1019,7 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
 
         } else if (CURRENT_SITE == LICHESS_ORG) {
             // check if flipped white: false  / black: true
-            let flipped = document.querySelector(".orientation-white") !== null ? false : true
+            const flipped = document.querySelector(".orientation-white") === null;
 
             // Use percentage-based positioning to match Lichess's native piece positioning
             const SQUARE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
