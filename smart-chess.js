@@ -624,8 +624,9 @@ function FenUtils() {
                             const leftPercent = parseFloat(leftMatch[1]);
                             
                             // Convert percentage to board coordinates (0-7)
-                            const yPos = Math.round(topPercent / SQUARE_SIZE_PERCENT);
-                            const xPos = Math.round(leftPercent / SQUARE_SIZE_PERCENT);
+                            // Using floor to ensure correct square placement
+                            const yPos = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
+                            const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
                             
                             // Bounds checking to ensure coordinates are valid
                             if (yPos >= 0 && yPos <= 7 && xPos >= 0 && xPos <= 7) {
