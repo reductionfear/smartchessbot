@@ -451,6 +451,7 @@ function FenUtils() {
     const SQUARE_SIZE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
     const STYLE_TOP_REGEX = /top:\s*(\d+(?:\.\d+)?)\s*%/;
     const STYLE_LEFT_REGEX = /left:\s*(\d+(?:\.\d+)?)\s*%/;
+    const PIECE_TYPES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
     
     this.board = [
         [1, 1, 1, 1, 1, 1, 1, 1],
@@ -487,8 +488,7 @@ function FenUtils() {
             }
             
             // Look for piece type class
-            const pieceTypes = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
-            for (const type of pieceTypes) {
+            for (const type of PIECE_TYPES) {
                 if (classList.includes(type)) {
                     pieceName = type;
                     break;
@@ -505,13 +505,17 @@ function FenUtils() {
                     pieceColor = 'black';
                 }
                 
-                const pieceTypes = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
-                for (const type of pieceTypes) {
+                for (const type of PIECE_TYPES) {
                     if (classStr.includes(type)) {
                         pieceName = type;
                         break;
                     }
                 }
+            }
+            
+            // If still unable to determine piece type, return null to skip this piece
+            if (!pieceColor || !pieceName) {
+                return null;
             }
 
             // fix pieceName
@@ -594,7 +598,10 @@ function FenUtils() {
         pieceElems.filter(pieceElem => !pieceElem.classList.contains("ghost")).forEach(pieceElem => {
             let pieceFenCode = this.getFenCodeFromPieceElem(pieceElem);
 
-
+            // Skip piece if we couldn't determine its type
+            if (!pieceFenCode) {
+                return;
+            }
 
             if (CURRENT_SITE == CHESS_COM) {
                 let [xPos, yPos] = pieceElem.classList.toString().match(/square-(\d)(\d)/).slice(1);
