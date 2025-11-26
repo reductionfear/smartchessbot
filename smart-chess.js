@@ -468,7 +468,8 @@ function FenUtils() {
         if (CURRENT_SITE == CHESS_COM) {
             return this.pieceCodeToFen([...pieceElem.classList].find(x => x.match(/^(b|w)[prnbqk]{1}$/)));
         } else if (CURRENT_SITE == LICHESS_ORG) {
-            let [pieceColor, pieceName] = pieceElem.cgPiece.split(' ');
+            // Extract piece info from class attribute (e.g., "white rook" or "black knight")
+            let [pieceColor, pieceName] = pieceElem.className.split(' ');
 
             // fix pieceName
             if (pieceName == "knight") {
@@ -557,9 +558,30 @@ function FenUtils() {
 
                 this.board[8 - yPos][xPos - 1] = pieceFenCode;
             } else if (CURRENT_SITE == LICHESS_ORG) {
-                let [xPos, yPos] = pieceElem.cgKey.split('');
-
-                this.board[8 - yPos][alphabetPosition(xPos)] = pieceFenCode;
+                // Try to get position from cgKey property set by Chessground
+                if (pieceElem.cgKey) {
+                    let [xPos, yPos] = pieceElem.cgKey.split('');
+                    this.board[8 - yPos][alphabetPosition(xPos)] = pieceFenCode;
+                } else {
+                    // Fallback: Extract position from style attribute if cgKey is not available
+                    const style = pieceElem.getAttribute('style');
+                    if (style) {
+                        const topMatch = style.match(/top:\s*(\d+(?:\.\d+)?)\s*%/);
+                        const leftMatch = style.match(/left:\s*(\d+(?:\.\d+)?)\s*%/);
+                        
+                        if (topMatch && leftMatch) {
+                            const topPercent = parseFloat(topMatch[1]);
+                            const leftPercent = parseFloat(leftMatch[1]);
+                            
+                            // Convert percentage to board coordinates (0-7)
+                            // Each square is 12.5% (100% / 8 squares)
+                            const yPos = Math.round(topPercent / 12.5);
+                            const xPos = Math.round(leftPercent / 12.5);
+                            
+                            this.board[yPos][xPos] = pieceFenCode;
+                        }
+                    }
+                }
             }
         });
 
