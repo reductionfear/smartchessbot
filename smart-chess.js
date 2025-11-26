@@ -128,6 +128,12 @@ var uiChessBoard = null;
 var activeGuiMoveHighlights = [];
 var activeSiteMoveHighlights = [];
 
+// Track the last FEN when highlights were shown to prevent premature clearing
+var lastHighlightedFen = null;
+
+// Minimum depth threshold for quality warning
+const MIN_DEPTH_THRESHOLD = 10;
+
 var engineLogNum = 1;
 var userscriptLogNum = 1;
 var enemyScore = 0;
@@ -211,7 +217,7 @@ if (!isNotCompatibleBrowser()) {
 
 
 
-function moveResult(from, to, power, clear = true) {
+function moveResult(from, to, power, clear = true, depth = null) {
     if (from.length < 2 || to.length < 2) {
         return;
     }
@@ -219,6 +225,9 @@ function moveResult(from, to, power, clear = true) {
     if (clear) {
         clearBoard();
     }
+
+    // Track the FEN when highlights are shown (lastFen is set by updateBestMove before this is called)
+    lastHighlightedFen = lastFen;
 
     if (!forcedBestMove) {
         if (isPlayerTurn) // my turn
@@ -232,6 +241,10 @@ function moveResult(from, to, power, clear = true) {
         Gui.document.querySelector('#bestmove-btn').disabled = false;
     }
 
+    // Log depth warning if analysis depth is shallow (only when depth is explicitly provided)
+    if (depth !== null && Number(depth) < MIN_DEPTH_THRESHOLD) {
+        Interface.log(`⚠️ Warning: Analysis depth only ${depth}, results may be unreliable`);
+    }
 
     const color = hexToRgb(bestMoveColors[0]);
     Interface.boardUtils.markMove(from, to, color);
@@ -257,6 +270,7 @@ function hexToRgb(hex) {
 
 
 function getBookMoves(request) {
+    Interface.log('Checking book moves from Lichess API...');
 
     GM_xmlhttpRequest({
         method: "GET",
@@ -267,20 +281,25 @@ function getBookMoves(request) {
         onload: function (response) {
             if (response.response.includes("error") || !response.ok) {
                 if (lastBestMoveID != request.id) {
+                    Interface.log('Ignoring stale book move response');
                     return;
                 }
+                Interface.log('No book move found, using engine analysis...');
                 getBestMoves(request);
             } else {
                 if (lastBestMoveID != request.id) {
+                    Interface.log('Ignoring stale book move response');
                     return;
                 }
 
                 let data = JSON.parse(response.response);
                 let nextMove = data.pvs[0].moves.split(' ')[0];
+                let depth = data.depth || current_depth;
 
+                Interface.log(`Book move found: ${nextMove} (depth ${depth})`);
 
                 possible_moves = [];
-                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), current_depth, true);
+                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), depth, true, depth);
             }
 
 
@@ -299,7 +318,7 @@ function getLichessCloudBestMoves(request) {
     // Use multiPv for multiple move suggestions (capped at 5 for cloud API)
     const multiPv = Math.min(max_best_moves + 1, 5);
 
-    Interface.log('Using Lichess Cloud API for analysis...');
+    Interface.log('Sending request to Lichess Cloud API...');
 
     GM_xmlhttpRequest({
         method: "GET",
@@ -309,8 +328,11 @@ function getLichessCloudBestMoves(request) {
         },
         onload: function (response) {
             if (lastBestMoveID != request.id) {
+                Interface.log('Ignoring stale response (request ID mismatch)');
                 return;
             }
+
+            Interface.log('Received response from Lichess Cloud API');
 
             // Check HTTP status code for error responses
             if (!response.response || response.status !== 200) {
@@ -345,10 +367,11 @@ function getLichessCloudBestMoves(request) {
                 }
 
                 Interface.updateBestMoveProgress(`Cloud Depth: ${depth}`);
-                Interface.engineLog("bestmove " + nextMove + " (Lichess Cloud, depth " + depth + ")");
+                Interface.engineLog("bestmove " + nextMove + " (Lichess Cloud, depth " + depth + ", score " + score + ")");
+                Interface.log(`Analysis complete: depth ${depth}, move ${nextMove}`);
 
-                // Use depth as power score for consistency with other engine methods
-                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), depth, true);
+                // Pass depth to moveResult for depth warning
+                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), depth, true, depth);
 
             } catch (e) {
                 Interface.log('Error parsing Lichess Cloud response: ' + e.message);
@@ -367,6 +390,8 @@ function getLichessCloudBestMoves(request) {
 }
 
 function getNodeBestMoves(request) {
+    Interface.log(`Sending request to Node Server (depth: ${current_depth}, movetime: ${current_movetime})...`);
+
     GM_xmlhttpRequest({
         method: "GET",
         url: node_engine_url + "/getBestMove?fen=" + request.fen + "&engine_mode=" + engineMode + "&depth=" + current_depth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name,
@@ -382,9 +407,11 @@ function getNodeBestMoves(request) {
             }
 
             if (lastBestMoveID != request.id) {
+                Interface.log('Ignoring stale response (request ID mismatch)');
                 return;
             }
 
+            Interface.log('Received response from Node Server');
 
             let data = result.data;
             let server_fen = data.fen;
@@ -394,19 +421,21 @@ function getNodeBestMoves(request) {
             let move = data.bestMove;
             let ponder = data.ponder
 
-
-
+            // Log the actual depth achieved vs requested
             if (engineMode == DEPTH_MODE) {
                 Interface.updateBestMoveProgress(`Depth: ${depth}`);
+                Interface.log(`Analysis complete: requested depth ${current_depth}, achieved depth ${depth}`);
             } else {
                 Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
+                Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
             }
 
-            Interface.engineLog("bestmove " + move + " ponder " + ponder);
+            Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
 
 
             possible_moves = [];
-            moveResult(move.slice(0, 2), move.slice(2, 4), power, true);
+            // Pass depth to moveResult for depth warning
+            moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
         }, onerror: function (error) {
             forcedBestMove = false;
             Gui.document.querySelector('#bestmove-btn').disabled = false;
@@ -1087,8 +1116,19 @@ function updateBestMove(mutationArr) {
     let currentFen = FenUtil.getFen();
 
 
+    // Only process if the FEN has actually changed (real piece movement)
     if (currentFen != lastFen) {
+        // Log that we detected a real position change
+        Interface.log(`Position changed, analyzing new position...`);
+        
         lastFen = currentFen;
+        
+        // Only clear highlights when FEN actually changes
+        // This prevents highlights from disappearing on click/hover events
+        if (lastHighlightedFen && currentFen !== lastHighlightedFen) {
+            clearBoard();
+            lastHighlightedFen = null;
+        }
 
 
         if (mutationArr) {
@@ -1111,9 +1151,13 @@ function updateBestMove(mutationArr) {
 
                 Interface.log(`Turn updated to ${turn}!`);
 
-                updateBoard();
+                updateBoard(false); // Don't clear again, we already did above if needed
                 sendBestMove();
             }
+        } else {
+            // No mutation array means we need to update immediately (e.g., player color change)
+            updateBoard(false);
+            sendBestMove();
         }
     }
 }
@@ -1136,16 +1180,24 @@ function sendBestMoveRequest() {
     let currentFen = FenUtil.getFen();
     possible_moves = [];
 
+    // Increment request ID immediately to invalidate any pending requests
+    // This ensures faster response in bullet games by cancelling stale requests
+    lastBestMoveID++;
+    const requestId = lastBestMoveID;
+    
+    Interface.log(`Requesting analysis (request #${requestId})...`);
+
     reloadChessEngine(false, () => {
-        Interface.log('Sending best move request to the engine!');
-
-        lastBestMoveID++;
-
+        // Check if this request is still the most recent one
+        if (requestId !== lastBestMoveID) {
+            Interface.log(`Skipping stale request #${requestId}`);
+            return;
+        }
 
         if (use_book_moves) {
-            getBookMoves({ id: lastBestMoveID, fen: currentFen });
+            getBookMoves({ id: requestId, fen: currentFen });
         } else {
-            getBestMoves({ id: lastBestMoveID, fen: currentFen });
+            getBestMoves({ id: requestId, fen: currentFen });
         }
     });
 }
@@ -1154,6 +1206,7 @@ function sendBestMoveRequest() {
 
 
 function clearBoard() {
+    Interface.log('Clearing board highlights (FEN changed)');
     Interface.stopBestMoveProcessingAnimation();
 
     Interface.boardUtils.removeBestMarkings();
@@ -1210,6 +1263,8 @@ function getBestMoves(request) {
             sleep(100);
         }
 
+        Interface.log(`Using local engine (depth: ${current_depth}, movetime: ${current_movetime})...`);
+
         engine.postMessage(`position fen ${request.fen}`);
 
         if (engineMode == DEPTH_MODE) {
@@ -1218,16 +1273,22 @@ function getBestMoves(request) {
             engine.postMessage('go movetime ' + current_movetime);
         }
 
+        // Track the achieved depth for reporting
+        let achievedDepth = current_depth;
+
         engine.onmessage = e => {
             if (lastBestMoveID != request.id) {
+                Interface.log('Ignoring stale engine response');
                 return;
             }
             if (e.data.includes('bestmove')) {
                 let move = e.data.split(' ')[1];
-                moveResult(move.slice(0, 2), move.slice(2, 4), current_depth, true);
+                Interface.log(`Analysis complete: depth ${achievedDepth}, move ${move}`);
+                // Pass achieved depth for depth warning
+                moveResult(move.slice(0, 2), move.slice(2, 4), current_depth, true, achievedDepth);
             } else if (e.data.includes('info')) {
                 const infoObj = LozzaUtils.extractInfo(e.data);
-                let depth = infoObj.depth || current_depth;
+                achievedDepth = infoObj.depth || current_depth;
                 let move_time = infoObj.time || current_movetime;
 
                 // Limit possible_moves to max_best_moves
@@ -1239,7 +1300,7 @@ function getBestMoves(request) {
 
 
                 if (engineMode == DEPTH_MODE) {
-                    Interface.updateBestMoveProgress(`Depth: ${depth}`);
+                    Interface.updateBestMoveProgress(`Depth: ${achievedDepth}`);
                 } else {
                     Interface.updateBestMoveProgress(`Move time: ${move_time} ms`);
                 }
@@ -1256,6 +1317,45 @@ function getBestMoves(request) {
 
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
+        // Filter out transient mutations (hover, click, drag states, ghost pieces, animations)
+        const significantMutations = mutationArr.filter(m => {
+            // Ensure target has classList before checking
+            const classList = m.target.classList;
+            if (!classList) {
+                return true; // Keep mutations on elements without classList
+            }
+            
+            // Skip mutations that are just attribute changes on highlight elements
+            if (classList.contains('highlight')) {
+                return false;
+            }
+            if (classList.contains('custom')) {
+                return false;
+            }
+            // Skip ghost pieces (used for drag previews)
+            if (classList.contains('ghost')) {
+                return false;
+            }
+            // Skip fading/animated elements
+            if (classList.contains('fading')) {
+                return false;
+            }
+            // Skip if the mutation is on a dragging piece
+            if (classList.contains('dragging')) {
+                return false;
+            }
+            // Skip cursor/pointer related changes on non-piece elements
+            if (m.attributeName === 'style' && m.target.tagName !== 'PIECE' && !classList.contains('piece')) {
+                return false;
+            }
+            return true;
+        });
+
+        // Only proceed if we have significant mutations
+        if (significantMutations.length === 0) {
+            return;
+        }
+
         lastPlayerColor = playerColor;
 
         updatePlayerColor(() => {
@@ -1263,7 +1363,7 @@ function observeNewMoves() {
                 Interface.log(`Player color changed from ${lastPlayerColor} to ${playerColor}!`);
                 updateBestMove();
             } else {
-                updateBestMove(mutationArr);
+                updateBestMove(significantMutations);
             }
         });
     };
