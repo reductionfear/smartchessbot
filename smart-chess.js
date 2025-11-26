@@ -447,6 +447,14 @@ function alphabetPosition(text) {
 
 
 function FenUtils() {
+    // Constants for Lichess position extraction
+    const SQUARE_SIZE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
+    const STYLE_TOP_REGEX = /top:\s*(\d+(?:\.\d+)?)\s*%/;
+    const STYLE_LEFT_REGEX = /left:\s*(\d+(?:\.\d+)?)\s*%/;
+    const PIECE_TYPES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
+    const BOARD_MIN = 0;
+    const BOARD_MAX = 7;
+    
     this.board = [
         [1, 1, 1, 1, 1, 1, 1, 1],
         [1, 1, 1, 1, 1, 1, 1, 1],
@@ -468,7 +476,49 @@ function FenUtils() {
         if (CURRENT_SITE == CHESS_COM) {
             return this.pieceCodeToFen([...pieceElem.classList].find(x => x.match(/^(b|w)[prnbqk]{1}$/)));
         } else if (CURRENT_SITE == LICHESS_ORG) {
-            let [pieceColor, pieceName] = pieceElem.cgPiece.split(' ');
+            // Extract piece info from class list (e.g., "white rook" or "black knight")
+            // Find the color and piece type classes
+            const classList = [...pieceElem.classList];
+            let pieceColor = null;
+            let pieceName = null;
+            
+            // Look for color class (white/black)
+            if (classList.includes('white')) {
+                pieceColor = 'white';
+            } else if (classList.includes('black')) {
+                pieceColor = 'black';
+            }
+            
+            // Look for piece type class
+            for (const type of PIECE_TYPES) {
+                if (classList.includes(type)) {
+                    pieceName = type;
+                    break;
+                }
+            }
+            
+            // If not found in classList, fall back to className parsing
+            if (!pieceColor || !pieceName) {
+                // Search for known patterns in className string
+                const classStr = pieceElem.className.toLowerCase();
+                if (classStr.includes('white')) {
+                    pieceColor = 'white';
+                } else if (classStr.includes('black')) {
+                    pieceColor = 'black';
+                }
+                
+                for (const type of PIECE_TYPES) {
+                    if (classStr.includes(type)) {
+                        pieceName = type;
+                        break;
+                    }
+                }
+            }
+            
+            // If still unable to determine piece type, return null to skip this piece
+            if (!pieceColor || !pieceName) {
+                return null;
+            }
 
             // fix pieceName
             if (pieceName == "knight") {
@@ -550,16 +600,43 @@ function FenUtils() {
         pieceElems.filter(pieceElem => !pieceElem.classList.contains("ghost")).forEach(pieceElem => {
             let pieceFenCode = this.getFenCodeFromPieceElem(pieceElem);
 
-
+            // Skip piece if we couldn't determine its type
+            if (!pieceFenCode) {
+                return;
+            }
 
             if (CURRENT_SITE == CHESS_COM) {
                 let [xPos, yPos] = pieceElem.classList.toString().match(/square-(\d)(\d)/).slice(1);
 
                 this.board[8 - yPos][xPos - 1] = pieceFenCode;
             } else if (CURRENT_SITE == LICHESS_ORG) {
-                let [xPos, yPos] = pieceElem.cgKey.split('');
-
-                this.board[8 - yPos][alphabetPosition(xPos)] = pieceFenCode;
+                // Try to get position from cgKey property set by Chessground
+                if (pieceElem.cgKey) {
+                    let [xPos, yPos] = pieceElem.cgKey.split('');
+                    this.board[8 - yPos][alphabetPosition(xPos)] = pieceFenCode;
+                } else {
+                    // Fallback: Extract position from style attribute if cgKey is not available
+                    const style = pieceElem.getAttribute('style');
+                    if (style) {
+                        const topMatch = style.match(STYLE_TOP_REGEX);
+                        const leftMatch = style.match(STYLE_LEFT_REGEX);
+                        
+                        if (topMatch && leftMatch) {
+                            const topPercent = parseFloat(topMatch[1]);
+                            const leftPercent = parseFloat(leftMatch[1]);
+                            
+                            // Convert percentage to board coordinates (0-7)
+                            // Using floor to ensure correct square placement
+                            const yPos = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
+                            const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
+                            
+                            // Bounds checking to ensure coordinates are valid
+                            if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
+                                this.board[yPos][xPos] = pieceFenCode;
+                            }
+                        }
+                    }
+                }
             }
         });
 
