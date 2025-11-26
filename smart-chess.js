@@ -45,7 +45,10 @@ const MIN_MOVETIME = 50;
 const MAX_ELO = 3500;
 const DEPTH_MODE = 0;
 const MOVETIME_MODE = 1;
+const MATE_SCORE = 10000;  // Score value for checkmate positions
 const rank = ["Beginner", "Intermediate", "Advanced", "Expert", "Master", "Grand Master"];
+// Web engine IDs (incompatible with Lichess due to CSP)
+const WEB_ENGINE_IDS = [0, 1, 2]; // Lozza, Stockfish 5, Stockfish 2018
 
 
 
@@ -95,6 +98,7 @@ var Gui;
 var closedGui = false;
 var reload_count = 1;
 var node_engine_id = 3;
+var lichess_cloud_engine_id = 4;
 var Interface = null;
 var LozzaUtils = null;
 var CURRENT_SITE = null;
@@ -289,6 +293,77 @@ function getBookMoves(request) {
         }
     });
 
+}
+
+function getLichessCloudBestMoves(request) {
+    // Use multiPv for multiple move suggestions (capped at 5 for cloud API)
+    const multiPv = Math.min(max_best_moves + 1, 5);
+
+    Interface.log('Using Lichess Cloud API for analysis...');
+
+    GM_xmlhttpRequest({
+        method: "GET",
+        url: LICHESS_API + "?fen=" + encodeURIComponent(request.fen) + "&multiPv=" + multiPv + "&variant=fromPosition",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        onload: function (response) {
+            if (lastBestMoveID != request.id) {
+                return;
+            }
+
+            // Check HTTP status code for error responses
+            if (!response.response || response.status !== 200) {
+                // Fallback to node server if cloud API fails
+                Interface.log('Lichess Cloud API unavailable, falling back to Node Server...');
+                getNodeBestMoves(request);
+                return;
+            }
+
+            try {
+                let data = JSON.parse(response.response);
+
+                if (!data.pvs || data.pvs.length === 0) {
+                    Interface.log('No analysis available from Lichess Cloud, trying Node Server...');
+                    getNodeBestMoves(request);
+                    return;
+                }
+
+                // Get the best move from the first PV line
+                let bestPv = data.pvs[0];
+                let nextMove = bestPv.moves.split(' ')[0];
+                let depth = data.depth || current_depth;
+                let score = bestPv.cp !== undefined ? bestPv.cp : (bestPv.mate !== undefined ? (bestPv.mate > 0 ? MATE_SCORE : -MATE_SCORE) : 0);
+
+                // Extract additional best moves for highlighting
+                possible_moves = [];
+                for (let i = 1; i < data.pvs.length && i <= max_best_moves; i++) {
+                    let pvMove = data.pvs[i].moves.split(' ')[0];
+                    if (pvMove && pvMove.length >= 4) {
+                        possible_moves.push(pvMove);
+                    }
+                }
+
+                Interface.updateBestMoveProgress(`Cloud Depth: ${depth}`);
+                Interface.engineLog("bestmove " + nextMove + " (Lichess Cloud, depth " + depth + ")");
+
+                // Use depth as power score for consistency with other engine methods
+                moveResult(nextMove.slice(0, 2), nextMove.slice(2, 4), depth, true);
+
+            } catch (e) {
+                Interface.log('Error parsing Lichess Cloud response: ' + e.message);
+                getNodeBestMoves(request);
+            }
+
+        },
+        onerror: function (error) {
+            if (lastBestMoveID != request.id) {
+                return;
+            }
+            Interface.log('Lichess Cloud API error, falling back to Node Server...');
+            getNodeBestMoves(request);
+        }
+    });
 }
 
 function getNodeBestMoves(request) {
@@ -1047,7 +1122,20 @@ function sleep(ms) {
 }
 
 function getBestMoves(request) {
-    if (engineIndex != node_engine_id && CURRENT_SITE !== LICHESS_ORG) {
+    // Use Lichess Cloud API when on Lichess.org and using Lichess Cloud engine
+    if (CURRENT_SITE === LICHESS_ORG && engineIndex === lichess_cloud_engine_id) {
+        getLichessCloudBestMoves(request);
+        return;
+    }
+
+    // Use Node server for Lichess.org (if not using Lichess Cloud) or when node engine selected
+    if (engineIndex === node_engine_id || CURRENT_SITE === LICHESS_ORG) {
+        getNodeBestMoves(request);
+        return;
+    }
+
+    // Local engines for Chess.com
+    if (engineIndex !== node_engine_id && CURRENT_SITE !== LICHESS_ORG) {
         // local engines
         while (!engine) {
             sleep(100);
@@ -1455,6 +1543,7 @@ function addGuiPages() {
                         <option value="option-stockfish" id="web-engine">Stockfish 5</option>
                         <option value="option-stockfish2" id="web-engine">Stockfish 2018</option>
                         <option value="option-nodeserver" id="local-engine">Node Server Engines</option>
+                        <option value="option-lichesscloud" id="lichess-cloud-engine">Lichess Cloud (Lichess.org only)</option>
                     </select>
                 </div>
 
@@ -1465,7 +1554,7 @@ function addGuiPages() {
                 </label>
 
 
-                <div id="reload-engine-div" style="display:${node_engine_id == engineIndex ? 'none' : 'block'};">
+                <div id="reload-engine-div" style="display:${(node_engine_id == engineIndex || lichess_cloud_engine_id == engineIndex) ? 'none' : 'block'};">
 
 
                     <label class="container">Enable Engine Reload
@@ -1498,6 +1587,10 @@ function addGuiPages() {
 					<input type="text" id="engine-name" value="${node_engine_name}">
                     </div>
 				</div>
+
+                <div id="lichess-cloud-info" style="display:${(engineIndex == lichess_cloud_engine_id) ? 'block' : 'none'};">
+                    <p style="color: #666; font-style: italic;">Lichess Cloud uses Lichess.org's cloud analysis API. Analysis depth depends on the position's popularity in the database.</p>
+                </div>
             </div>
         </div>
 
@@ -1712,6 +1805,7 @@ function openGUI() {
         const engineModeElem = Gui.document.querySelector('#select-engine-mode');
         const engineElem = Gui.document.querySelector('#select-engine');
         const engineNameDivElem = Gui.document.querySelector('#node-engine-div');
+        const lichessCloudInfoElem = Gui.document.querySelector('#lichess-cloud-info');
         const reloadEngineDivElem = Gui.document.querySelector('#reload-engine-div');
         const reloadEngineElem = Gui.document.querySelector('#reload-engine');
         const reloadEveryDivElem = Gui.document.querySelector('#reload-count-div');
@@ -1831,10 +1925,14 @@ function openGUI() {
 
 
         if (CURRENT_SITE == LICHESS_ORG) {
-            // disabled web engine selection due to cors issues
+            // On Lichess: disable web engines due to CSP issues, but enable Lichess Cloud
             engineElem.childNodes.forEach(elem => {
                 if (elem.id == "web-engine") {
                     elem.disabled = true;
+                }
+                // Lichess Cloud and Node Server are available on Lichess
+                if (elem.id == "lichess-cloud-engine" || elem.id == "local-engine") {
+                    elem.disabled = false;
                 }
             })
 
@@ -1843,10 +1941,33 @@ function openGUI() {
                 Gui.document.querySelector('#orientation').remove();
             }
 
-            engineElem.selectedIndex = node_engine_id;
-            maxMovesDivElem.style.display = "none";
-            engineNameDivElem.style.display = "block";
-            reloadEngineDivElem.style.display = "none";
+            // Default to Lichess Cloud engine on Lichess.org if no saved preference or using web engine
+            // Default to Lichess Cloud engine if currently using an incompatible web engine
+            if (WEB_ENGINE_IDS.includes(engineIndex)) {
+                engineIndex = lichess_cloud_engine_id;
+                GM_setValue(dbValues.engineIndex, engineIndex);
+            }
+            engineElem.selectedIndex = engineIndex;
+
+            // Show/hide appropriate divs based on selected engine
+            if (engineIndex === lichess_cloud_engine_id) {
+                maxMovesDivElem.style.display = "block";
+                engineNameDivElem.style.display = "none";
+                reloadEngineDivElem.style.display = "none";
+                Gui.document.querySelector('#lichess-cloud-info').style.display = "block";
+            } else {
+                maxMovesDivElem.style.display = "none";
+                engineNameDivElem.style.display = "block";
+                reloadEngineDivElem.style.display = "none";
+                Gui.document.querySelector('#lichess-cloud-info').style.display = "none";
+            }
+        } else {
+            // On Chess.com: disable Lichess Cloud option
+            engineElem.childNodes.forEach(elem => {
+                if (elem.id == "lichess-cloud-engine") {
+                    elem.disabled = true;
+                }
+            })
         }
 
 
@@ -1944,11 +2065,19 @@ function openGUI() {
                 reloadEngineDivElem.style.display = "none";
                 engineNameDivElem.style.display = "block";
                 maxMovesDivElem.style.display = "none";
+                if (lichessCloudInfoElem) lichessCloudInfoElem.style.display = "none";
+            }
+            else if (lichess_cloud_engine_id == engineIndex) {
+                reloadEngineDivElem.style.display = "none";
+                engineNameDivElem.style.display = "none";
+                maxMovesDivElem.style.display = "block";
+                if (lichessCloudInfoElem) lichessCloudInfoElem.style.display = "block";
             }
             else {
                 reloadEngineDivElem.style.display = "block";
                 engineNameDivElem.style.display = "none";
                 maxMovesDivElem.style.display = "block";
+                if (lichessCloudInfoElem) lichessCloudInfoElem.style.display = "none";
             }
 
 
@@ -2078,8 +2207,8 @@ function changeEnginePower(val, eloElem, maxMovesElem) {
 
 
 function reloadChessEngine(forced, callback) {
-    // reload only if using local engines
-    if (node_engine_id == engineIndex && forced == false) {
+    // reload only if using local engines (skip for node server and lichess cloud)
+    if ((node_engine_id == engineIndex || lichess_cloud_engine_id == engineIndex) && forced == false) {
         callback();
     }
     else if (reload_engine == true && reload_count >= reload_every || forced == true) {
@@ -2100,8 +2229,8 @@ function reloadChessEngine(forced, callback) {
 
 
 function loadChessEngine(callback) {
-    // exclude lichess.org
-    if (CURRENT_SITE == LICHESS_ORG) {
+    // Skip local engine loading for Lichess.org and Lichess Cloud engine
+    if (CURRENT_SITE == LICHESS_ORG || engineIndex == lichess_cloud_engine_id || engineIndex == node_engine_id) {
         return callback();
     }
 
