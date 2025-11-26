@@ -524,10 +524,14 @@ function alphabetPosition(text) {
 function FenUtils() {
     // Constants for Lichess position extraction
     const SQUARE_SIZE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
+    const DEFAULT_BOARD_SIZE = 400; // Default board size in pixels when dimensions cannot be determined
     const STYLE_TOP_REGEX = /top:\s*(\d+(?:\.\d+)?)\s*%/;
     const STYLE_LEFT_REGEX = /left:\s*(\d+(?:\.\d+)?)\s*%/;
     // Regex for transform: translate(Xpx, Ypx) or translate3d(Xpx, Ypx, Zpx)
-    const TRANSFORM_REGEX = /transform:\s*translate(?:3d)?\(\s*(-?\d+(?:\.\d+)?)\s*px\s*,\s*(-?\d+(?:\.\d+)?)\s*px/;
+    const TRANSFORM_REGEX = /transform:\s*translate(?:3d)?\(\s*(-?\d+(?:\.\d+)?)\s*px\s*,\s*(-?\d+(?:\.\d+)?)\s*px(?:\s*,\s*-?\d+(?:\.\d+)?\s*px)?\)/;
+    // Regex for parsing container dimensions
+    const STYLE_WIDTH_REGEX = /width:\s*(\d+(?:\.\d+)?)\s*px/;
+    const STYLE_HEIGHT_REGEX = /height:\s*(\d+(?:\.\d+)?)\s*px/;
     const PIECE_TYPES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
     const BOARD_MIN = 0;
     const BOARD_MAX = 7;
@@ -705,12 +709,12 @@ function FenUtils() {
                             const cgContainer = chessBoardElem.querySelector('cg-container');
                             if (cgContainer) {
                                 const containerStyle = cgContainer.getAttribute('style') || '';
-                                const widthMatch = containerStyle.match(/width:\s*(\d+(?:\.\d+)?)\s*px/);
-                                const heightMatch = containerStyle.match(/height:\s*(\d+(?:\.\d+)?)\s*px/);
+                                const widthMatch = containerStyle.match(STYLE_WIDTH_REGEX);
+                                const heightMatch = containerStyle.match(STYLE_HEIGHT_REGEX);
                                 
                                 // Default to common board size if not found in style
-                                const boardWidth = widthMatch ? parseFloat(widthMatch[1]) : cgContainer.clientWidth || 400;
-                                const boardHeight = heightMatch ? parseFloat(heightMatch[1]) : cgContainer.clientHeight || 400;
+                                const boardWidth = widthMatch ? parseFloat(widthMatch[1]) : cgContainer.clientWidth || DEFAULT_BOARD_SIZE;
+                                const boardHeight = heightMatch ? parseFloat(heightMatch[1]) : cgContainer.clientHeight || DEFAULT_BOARD_SIZE;
                                 
                                 const squareWidth = boardWidth / 8;
                                 const squareHeight = boardHeight / 8;
