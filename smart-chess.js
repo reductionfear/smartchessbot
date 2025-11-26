@@ -274,7 +274,7 @@ function getBookMoves(request) {
 
     GM_xmlhttpRequest({
         method: "GET",
-        url: LICHESS_API + "?fen=" + request.fen + "&multiPv=1&variant=fromPosition",
+        url: LICHESS_API + "?fen=" + encodeURIComponent(request.fen) + "&multiPv=1&variant=fromPosition",
         headers: {
             "Content-Type": "application/json"
         },
