@@ -524,8 +524,14 @@ function alphabetPosition(text) {
 function FenUtils() {
     // Constants for Lichess position extraction
     const SQUARE_SIZE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
+    const DEFAULT_BOARD_SIZE = 400; // Default board size in pixels when dimensions cannot be determined
     const STYLE_TOP_REGEX = /top:\s*(\d+(?:\.\d+)?)\s*%/;
     const STYLE_LEFT_REGEX = /left:\s*(\d+(?:\.\d+)?)\s*%/;
+    // Regex for transform: translate(Xpx, Ypx) or translate3d(Xpx, Ypx, Zpx)
+    const TRANSFORM_REGEX = /transform:\s*translate(?:3d)?\(\s*(-?\d+(?:\.\d+)?)\s*px\s*,\s*(-?\d+(?:\.\d+)?)\s*px(?:\s*,\s*-?\d+(?:\.\d+)?\s*px)?\)/;
+    // Regex for parsing container dimensions
+    const STYLE_WIDTH_REGEX = /width:\s*(\d+(?:\.\d+)?)\s*px/;
+    const STYLE_HEIGHT_REGEX = /height:\s*(\d+(?:\.\d+)?)\s*px/;
     const PIECE_TYPES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
     const BOARD_MIN = 0;
     const BOARD_MAX = 7;
@@ -693,21 +699,53 @@ function FenUtils() {
                     // Fallback: Extract position from style attribute if cgKey is not available
                     const style = pieceElem.getAttribute('style');
                     if (style) {
-                        const topMatch = style.match(STYLE_TOP_REGEX);
-                        const leftMatch = style.match(STYLE_LEFT_REGEX);
-                        
-                        if (topMatch && leftMatch) {
-                            const topPercent = parseFloat(topMatch[1]);
-                            const leftPercent = parseFloat(leftMatch[1]);
+                        // Try transform: translate() first (pixel-based positioning)
+                        const transformMatch = style.match(TRANSFORM_REGEX);
+                        if (transformMatch) {
+                            const xPixels = parseFloat(transformMatch[1]);
+                            const yPixels = parseFloat(transformMatch[2]);
                             
-                            // Convert percentage to board coordinates (0-7)
-                            // Using floor to ensure correct square placement
-                            const yPos = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
-                            const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
+                            // Get board dimensions from cg-container
+                            const cgContainer = chessBoardElem.querySelector('cg-container');
+                            if (cgContainer) {
+                                const containerStyle = cgContainer.getAttribute('style') || '';
+                                const widthMatch = containerStyle.match(STYLE_WIDTH_REGEX);
+                                const heightMatch = containerStyle.match(STYLE_HEIGHT_REGEX);
+                                
+                                // Default to common board size if not found in style
+                                const boardWidth = widthMatch ? parseFloat(widthMatch[1]) : cgContainer.clientWidth || DEFAULT_BOARD_SIZE;
+                                const boardHeight = heightMatch ? parseFloat(heightMatch[1]) : cgContainer.clientHeight || DEFAULT_BOARD_SIZE;
+                                
+                                const squareWidth = boardWidth / 8;
+                                const squareHeight = boardHeight / 8;
+                                
+                                // Convert pixel position to board coordinates
+                                const xPos = Math.floor(xPixels / squareWidth);
+                                const yPos = Math.floor(yPixels / squareHeight);
+                                
+                                // Bounds checking to ensure coordinates are valid
+                                if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
+                                    this.board[yPos][xPos] = pieceFenCode;
+                                }
+                            }
+                        } else {
+                            // Fallback: try top/left percentage positioning
+                            const topMatch = style.match(STYLE_TOP_REGEX);
+                            const leftMatch = style.match(STYLE_LEFT_REGEX);
                             
-                            // Bounds checking to ensure coordinates are valid
-                            if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
-                                this.board[yPos][xPos] = pieceFenCode;
+                            if (topMatch && leftMatch) {
+                                const topPercent = parseFloat(topMatch[1]);
+                                const leftPercent = parseFloat(leftMatch[1]);
+                                
+                                // Convert percentage to board coordinates (0-7)
+                                // Using floor to ensure correct square placement
+                                const yPos = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
+                                const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
+                                
+                                // Bounds checking to ensure coordinates are valid
+                                if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
+                                    this.board[yPos][xPos] = pieceFenCode;
+                                }
                             }
                         }
                     }
