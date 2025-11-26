@@ -520,6 +520,11 @@ function alphabetPosition(text) {
     return text.charCodeAt(0) - 97;
 }
 
+// Helper function to check if the Lichess board is flipped (playing as black)
+function isLichessBoardFlipped() {
+    return document.querySelector(".orientation-white") === null;
+}
+
 
 function FenUtils() {
     // Constants for Lichess position extraction
@@ -692,7 +697,7 @@ function FenUtils() {
                 this.board[8 - yPos][xPos - 1] = pieceFenCode;
             } else if (CURRENT_SITE == LICHESS_ORG) {
                 // Check board orientation to properly map visual positions to FEN coordinates
-                const flipped = document.querySelector(".orientation-white") === null;
+                const flipped = isLichessBoardFlipped();
                 
                 // Try to get position from cgKey property set by Chessground
                 if (pieceElem.cgKey) {
@@ -1019,7 +1024,7 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
 
         } else if (CURRENT_SITE == LICHESS_ORG) {
             // check if flipped white: false  / black: true
-            const flipped = document.querySelector(".orientation-white") === null;
+            const flipped = isLichessBoardFlipped();
 
             // Use percentage-based positioning to match Lichess's native piece positioning
             const SQUARE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
