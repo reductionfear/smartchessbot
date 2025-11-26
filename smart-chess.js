@@ -170,10 +170,11 @@ onload = function () {
         }
 
         if (window.location.href.includes("lichess.org")) {
-            if (document.querySelector('piece')) {
+            const mainBoard = document.querySelector('.round__app__board.main-board');
+            if (mainBoard && mainBoard.querySelector('piece')) {
                 CURRENT_SITE = LICHESS_ORG;
-                boardElem = document.querySelector('.main-board');
-                firstPieceElem = document.querySelector('piece');
+                boardElem = mainBoard;
+                firstPieceElem = mainBoard.querySelector('piece');
             }
         }
         else if (window.location.href.includes("chess.com")) {
