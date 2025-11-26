@@ -226,9 +226,8 @@ function moveResult(from, to, power, clear = true, depth = null) {
         clearBoard();
     }
 
-    // Track the FEN when highlights are shown
-    const FenUtil = new FenUtils();
-    lastHighlightedFen = FenUtil.getFen();
+    // Track the FEN when highlights are shown using lastFen (already computed)
+    lastHighlightedFen = lastFen;
 
     if (!forcedBestMove) {
         if (isPlayerTurn) // my turn
@@ -242,10 +241,9 @@ function moveResult(from, to, power, clear = true, depth = null) {
         Gui.document.querySelector('#bestmove-btn').disabled = false;
     }
 
-    // Log depth warning if analysis depth is shallow
-    const analysisDepth = depth || power;
-    if (analysisDepth && Number(analysisDepth) < MIN_DEPTH_THRESHOLD) {
-        Interface.log(`⚠️ Warning: Analysis depth only ${analysisDepth}, results may be unreliable`);
+    // Log depth warning if analysis depth is shallow (only when depth is explicitly provided)
+    if (depth !== null && Number(depth) < MIN_DEPTH_THRESHOLD) {
+        Interface.log(`⚠️ Warning: Analysis depth only ${depth}, results may be unreliable`);
     }
 
     const color = hexToRgb(bestMoveColors[0]);
@@ -1321,27 +1319,33 @@ function observeNewMoves() {
     const handleMutation = (mutationArr) => {
         // Filter out transient mutations (hover, click, drag states, ghost pieces, animations)
         const significantMutations = mutationArr.filter(m => {
+            // Ensure target has classList before checking
+            const classList = m.target.classList;
+            if (!classList) {
+                return true; // Keep mutations on elements without classList
+            }
+            
             // Skip mutations that are just attribute changes on highlight elements
-            if (m.target.classList && m.target.classList.contains('highlight')) {
+            if (classList.contains('highlight')) {
                 return false;
             }
-            if (m.target.classList && m.target.classList.contains('custom')) {
+            if (classList.contains('custom')) {
                 return false;
             }
             // Skip ghost pieces (used for drag previews)
-            if (m.target.classList && m.target.classList.contains('ghost')) {
+            if (classList.contains('ghost')) {
                 return false;
             }
             // Skip fading/animated elements
-            if (m.target.classList && m.target.classList.contains('fading')) {
+            if (classList.contains('fading')) {
                 return false;
             }
             // Skip if the mutation is on a dragging piece
-            if (m.target.classList && m.target.classList.contains('dragging')) {
+            if (classList.contains('dragging')) {
                 return false;
             }
-            // Skip cursor/pointer related changes
-            if (m.attributeName === 'style' && m.target.tagName !== 'PIECE' && !m.target.classList?.contains('piece')) {
+            // Skip cursor/pointer related changes on non-piece elements
+            if (m.attributeName === 'style' && m.target.tagName !== 'PIECE' && !classList.contains('piece')) {
                 return false;
             }
             return true;
