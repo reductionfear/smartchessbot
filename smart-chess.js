@@ -452,6 +452,8 @@ function FenUtils() {
     const STYLE_TOP_REGEX = /top:\s*(\d+(?:\.\d+)?)\s*%/;
     const STYLE_LEFT_REGEX = /left:\s*(\d+(?:\.\d+)?)\s*%/;
     const PIECE_TYPES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
+    const BOARD_MIN = 0;
+    const BOARD_MAX = 7;
     
     this.board = [
         [1, 1, 1, 1, 1, 1, 1, 1],
@@ -629,7 +631,7 @@ function FenUtils() {
                             const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
                             
                             // Bounds checking to ensure coordinates are valid
-                            if (yPos >= 0 && yPos <= 7 && xPos >= 0 && xPos <= 7) {
+                            if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
                                 this.board[yPos][xPos] = pieceFenCode;
                             }
                         }
