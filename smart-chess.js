@@ -691,6 +691,9 @@ function FenUtils() {
 
                 this.board[8 - yPos][xPos - 1] = pieceFenCode;
             } else if (CURRENT_SITE == LICHESS_ORG) {
+                // Check board orientation to properly map visual positions to FEN coordinates
+                const flipped = document.querySelector(".orientation-white") === null;
+                
                 // Try to get position from cgKey property set by Chessground
                 if (pieceElem.cgKey) {
                     let [xPos, yPos] = pieceElem.cgKey.split('');
@@ -719,13 +722,25 @@ function FenUtils() {
                                 const squareWidth = boardWidth / 8;
                                 const squareHeight = boardHeight / 8;
                                 
-                                // Convert pixel position to board coordinates
-                                const xPos = Math.floor(xPixels / squareWidth);
-                                const yPos = Math.floor(yPixels / squareHeight);
+                                // Convert pixel position to visual board coordinates (0-7)
+                                let visualX = Math.floor(xPixels / squareWidth);
+                                let visualY = Math.floor(yPixels / squareHeight);
+                                
+                                // Convert visual coordinates to FEN coordinates based on orientation
+                                let fenX, fenY;
+                                if (!flipped) {
+                                    // White's view: visual coordinates match FEN coordinates
+                                    fenX = visualX;
+                                    fenY = visualY;
+                                } else {
+                                    // Black's view: board is flipped, so invert both axes
+                                    fenX = 7 - visualX;
+                                    fenY = 7 - visualY;
+                                }
                                 
                                 // Bounds checking to ensure coordinates are valid
-                                if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
-                                    this.board[yPos][xPos] = pieceFenCode;
+                                if (fenY >= BOARD_MIN && fenY <= BOARD_MAX && fenX >= BOARD_MIN && fenX <= BOARD_MAX) {
+                                    this.board[fenY][fenX] = pieceFenCode;
                                 }
                             }
                         } else {
@@ -737,14 +752,25 @@ function FenUtils() {
                                 const topPercent = parseFloat(topMatch[1]);
                                 const leftPercent = parseFloat(leftMatch[1]);
                                 
-                                // Convert percentage to board coordinates (0-7)
-                                // Using floor to ensure correct square placement
-                                const yPos = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
-                                const xPos = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
+                                // Convert percentage to visual board coordinates (0-7)
+                                let visualY = Math.floor(topPercent / SQUARE_SIZE_PERCENT);
+                                let visualX = Math.floor(leftPercent / SQUARE_SIZE_PERCENT);
+                                
+                                // Convert visual coordinates to FEN coordinates based on orientation
+                                let fenX, fenY;
+                                if (!flipped) {
+                                    // White's view: visual coordinates match FEN coordinates
+                                    fenX = visualX;
+                                    fenY = visualY;
+                                } else {
+                                    // Black's view: board is flipped, so invert both axes
+                                    fenX = 7 - visualX;
+                                    fenY = 7 - visualY;
+                                }
                                 
                                 // Bounds checking to ensure coordinates are valid
-                                if (yPos >= BOARD_MIN && yPos <= BOARD_MAX && xPos >= BOARD_MIN && xPos <= BOARD_MAX) {
-                                    this.board[yPos][xPos] = pieceFenCode;
+                                if (fenY >= BOARD_MIN && fenY <= BOARD_MAX && fenX >= BOARD_MIN && fenX <= BOARD_MAX) {
+                                    this.board[fenY][fenX] = pieceFenCode;
                                 }
                             }
                         }
@@ -992,25 +1018,24 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
             parentElem = chessBoardElem;
 
         } else if (CURRENT_SITE == LICHESS_ORG) {
-            let x_pos, y_pos
             // check if flipped white: false  / black: true
             let flipped = document.querySelector(".orientation-white") !== null ? false : true
 
-
-            let default_square_width = parseInt(chessBoardElem.querySelector("cg-container").style.width) / 8;
-            let default_square_height = parseInt(chessBoardElem.querySelector("cg-container").style.height) / 8;
-
+            // Use percentage-based positioning to match Lichess's native piece positioning
+            const SQUARE_PERCENT = 12.5; // Each square is 12.5% (100% / 8 squares)
+            let left_percent, top_percent;
 
             if (!flipped) {
                 // player has white side
-                x_pos = alphabetPosition(fenSquareCode[0]) * default_square_width;
-                y_pos = (8 - Number(fenSquareCode[1])) * default_square_height;
+                // File a=0%, h=87.5%; Rank 1=87.5% (bottom), Rank 8=0% (top)
+                left_percent = alphabetPosition(fenSquareCode[0]) * SQUARE_PERCENT;
+                top_percent = (8 - Number(fenSquareCode[1])) * SQUARE_PERCENT;
             } else {
-                // black side
-                x_pos = (7 - alphabetPosition(fenSquareCode[0])) * default_square_width;
-                y_pos = (Number(fenSquareCode[1]) - 1) * default_square_height;
+                // black side (board is flipped)
+                // File a=87.5% (right), h=0% (left); Rank 1=0% (top), Rank 8=87.5% (bottom)
+                left_percent = (7 - alphabetPosition(fenSquareCode[0])) * SQUARE_PERCENT;
+                top_percent = (Number(fenSquareCode[1]) - 1) * SQUARE_PERCENT;
             }
-
 
             highlightElem = document.createElement('square');
             highlightElem.classList.add('custom');
@@ -1019,8 +1044,9 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
             highlightElem.style = style;
             highlightElem.style.backgroundColor = `rgba(${rgba_color[0]},${rgba_color[1]},${rgba_color[2]},${rgba_color[3]})`;
 
-
-            highlightElem.style.transform = `translate(${x_pos}px,${y_pos}px)`;
+            // Use percentage-based positioning like Lichess pieces
+            highlightElem.style.top = `${top_percent}%`;
+            highlightElem.style.left = `${left_percent}%`;
             highlightElem.style.zIndex = 1;
 
             activeSiteMoveHighlights.push(highlightElem);
