@@ -318,11 +318,13 @@ function getLichessCloudBestMoves(request) {
     // Use multiPv for multiple move suggestions (capped at 5 for cloud API)
     const multiPv = Math.min(max_best_moves + 1, 5);
 
-    Interface.log('Sending request to Lichess Cloud API...');
+    // Construct full URL for logging
+    const fullUrl = LICHESS_API + "?fen=" + encodeURIComponent(request.fen) + "&multiPv=" + multiPv + "&variant=fromPosition";
+    Interface.log(`Lichess Cloud request URL: ${fullUrl}`);
 
     GM_xmlhttpRequest({
         method: "GET",
-        url: LICHESS_API + "?fen=" + encodeURIComponent(request.fen) + "&multiPv=" + multiPv + "&variant=fromPosition",
+        url: fullUrl,
         headers: {
             "Content-Type": "application/json"
         },
@@ -390,11 +392,13 @@ function getLichessCloudBestMoves(request) {
 }
 
 function getNodeBestMoves(request) {
-    Interface.log(`Sending request to Node Server (depth: ${current_depth}, movetime: ${current_movetime})...`);
+    // Construct full URL for logging and debugging
+    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + current_depth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name;
+    Interface.log(`Node Server request URL: ${fullUrl}`);
 
     GM_xmlhttpRequest({
         method: "GET",
-        url: node_engine_url + "/getBestMove?fen=" + request.fen + "&engine_mode=" + engineMode + "&depth=" + current_depth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name,
+        url: fullUrl,
         headers: {
             "Content-Type": "application/json"
         },
@@ -1036,6 +1040,8 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
             highlightElem.dataset.testElement = 'highlight';
             highlightElem.style = style;
             highlightElem.style.backgroundColor = `rgba(${rgba_color[0]},${rgba_color[1]},${rgba_color[2]},${rgba_color[3]})`;
+            // Allow clicks to pass through highlight to the board underneath
+            highlightElem.style.pointerEvents = 'none';
 
 
             activeSiteMoveHighlights.push(highlightElem);
@@ -1077,6 +1083,8 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
             highlightElem.dataset.testElement = 'highlight';
             highlightElem.style = style;
             highlightElem.style.backgroundColor = `rgba(${rgba_color[0]},${rgba_color[1]},${rgba_color[2]},${rgba_color[3]})`;
+            // Allow clicks to pass through highlight to the board underneath
+            highlightElem.style.pointerEvents = 'none';
 
             // Use percentage-based positioning like Lichess pieces
             highlightElem.style.top = `${top_percent}%`;
@@ -1315,6 +1323,10 @@ function getBestMoves(request) {
 
 
 
+// Debounce timeout for mutation observer to prevent rapid clearing
+let mutationDebounceTimeout = null;
+const MUTATION_DEBOUNCE_MS = 100;
+
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
         // Filter out transient mutations (hover, click, drag states, ghost pieces, animations)
@@ -1356,22 +1368,29 @@ function observeNewMoves() {
             return;
         }
 
-        lastPlayerColor = playerColor;
+        // Clear any pending debounce operation
+        if (mutationDebounceTimeout) {
+            clearTimeout(mutationDebounceTimeout);
+        }
 
-        updatePlayerColor(() => {
-            if (playerColor != lastPlayerColor) {
-                Interface.log(`Player color changed from ${lastPlayerColor} to ${playerColor}!`);
-                updateBestMove();
-            } else {
-                updateBestMove(significantMutations);
-            }
-        });
+        // Debounce the mutation processing by 100ms to prevent rapid clearing
+        mutationDebounceTimeout = setTimeout(() => {
+            lastPlayerColor = playerColor;
+
+            updatePlayerColor(() => {
+                if (playerColor != lastPlayerColor) {
+                    Interface.log(`Player color changed from ${lastPlayerColor} to ${playerColor}!`);
+                    updateBestMove();
+                } else {
+                    updateBestMove(significantMutations);
+                }
+            });
+        }, MUTATION_DEBOUNCE_MS);
     };
 
     const boardObserver = new MutationObserver(handleMutation);
     boardObserver.observe(chessBoardElem, { childList: true, subtree: true, attributes: true });
 }
-
 
 
 function addGuiPages() {
