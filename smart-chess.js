@@ -497,7 +497,21 @@ function FenUtils() {
             
             // If not found in classList, fall back to className parsing
             if (!pieceColor || !pieceName) {
-                [pieceColor, pieceName] = pieceElem.className.split(' ');
+                // Search for known patterns in className string
+                const classStr = pieceElem.className.toLowerCase();
+                if (classStr.includes('white')) {
+                    pieceColor = 'white';
+                } else if (classStr.includes('black')) {
+                    pieceColor = 'black';
+                }
+                
+                const pieceTypes = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
+                for (const type of pieceTypes) {
+                    if (classStr.includes(type)) {
+                        pieceName = type;
+                        break;
+                    }
+                }
             }
 
             // fix pieceName
@@ -606,7 +620,10 @@ function FenUtils() {
                             const yPos = Math.round(topPercent / SQUARE_SIZE_PERCENT);
                             const xPos = Math.round(leftPercent / SQUARE_SIZE_PERCENT);
                             
-                            this.board[yPos][xPos] = pieceFenCode;
+                            // Bounds checking to ensure coordinates are valid
+                            if (yPos >= 0 && yPos <= 7 && xPos >= 0 && xPos <= 7) {
+                                this.board[yPos][xPos] = pieceFenCode;
+                            }
                         }
                     }
                 }
