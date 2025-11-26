@@ -226,7 +226,7 @@ function moveResult(from, to, power, clear = true, depth = null) {
         clearBoard();
     }
 
-    // Track the FEN when highlights are shown using lastFen (already computed)
+    // Track the FEN when highlights are shown (lastFen is set by updateBestMove before this is called)
     lastHighlightedFen = lastFen;
 
     if (!forcedBestMove) {
