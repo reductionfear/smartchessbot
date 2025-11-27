@@ -1217,7 +1217,10 @@ function updateBestMove(mutationArr) {
             if (attributeMutationArr?.length) {
                 turn = FenUtil.getPieceOppositeColor(FenUtil.getFenCodeFromPieceElem(attributeMutationArr[0].target));
 
-                last_turn = turn;
+                // last_turn should store who JUST MOVED (the piece's color), not whose turn is next
+                // If turn is 'w' (white to move), then black just moved, so last_turn = 'b'
+                // If turn is 'b' (black to move), then white just moved, so last_turn = 'w'
+                last_turn = turn === 'w' ? 'b' : 'w';
 
 
 
