@@ -430,8 +430,12 @@ function getNodeBestMoves(request) {
     // Add bullet_mode parameter to URL
     const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
     
+    // Calculate the correct turn for the engine: last_turn is who just moved,
+    // so the engine should analyze for the opposite color (whose turn is next)
+    const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
+    
     // Construct full URL for logging and debugging
-    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name + bulletParam;
+    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
     Interface.log(`Node Server request URL: ${fullUrl}`);
 
     GM_xmlhttpRequest({
@@ -884,7 +888,16 @@ function FenUtils() {
 
     this.getTurnFromFen = (fen) => {
         // The turn is the second part of the FEN string
-        return fen.split(' ')[1] || (last_turn || turn);
+        const fenTurn = fen.split(' ')[1];
+        if (fenTurn) {
+            return fenTurn;
+        }
+        // last_turn represents who just moved, so we need the opposite (whose turn is next)
+        // If Black just moved (last_turn=b), it's White's turn (w) and vice versa
+        if (last_turn) {
+            return last_turn === 'w' ? 'b' : 'w';
+        }
+        return turn;
     };
 }
 
