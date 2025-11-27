@@ -2443,12 +2443,12 @@ function openGUI() {
         };
 
         bulletDepthElem.onchange = () => {
-            bullet_depth = parseInt(bulletDepthElem.value);
+            bullet_depth = parseInt(bulletDepthElem.value, 10);
             GM_setValue(dbValues.bullet_depth, bullet_depth);
         };
 
         bulletMovetimeElem.onchange = () => {
-            bullet_movetime = parseInt(bulletMovetimeElem.value);
+            bullet_movetime = parseInt(bulletMovetimeElem.value, 10);
             GM_setValue(dbValues.bullet_movetime, bullet_movetime);
         };
 
