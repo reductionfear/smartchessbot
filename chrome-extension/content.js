@@ -124,6 +124,10 @@ var lastHighlightedFen = null;
 var lastHighlightTime = 0;
 const MIN_HIGHLIGHT_DISPLAY_MS = 500; // Show highlights for at least 500ms
 
+// Request throttling to prevent excessive analysis requests
+var lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL_MS = 200; // Max 5 requests per second
+
 const MIN_DEPTH_THRESHOLD = 10;
 
 var engineLogNum = 1;
@@ -1078,6 +1082,14 @@ function sendBestMove() {
 }
 
 function sendBestMoveRequest() {
+    // Throttle requests to prevent excessive analysis in fast games
+    const now = Date.now();
+    if (now - lastRequestTime < MIN_REQUEST_INTERVAL_MS) {
+        Interface.log('Request throttled - too soon since last request');
+        return;
+    }
+    lastRequestTime = now;
+    
     const FenUtil = new FenUtils();
     let currentFen = FenUtil.getFen();
     possible_moves = [];
@@ -1105,6 +1117,16 @@ function clearBoard(force = false) {
     if (!force && now - lastHighlightTime < MIN_HIGHLIGHT_DISPLAY_MS) {
         Interface.log('Skipping highlight clear - minimum display time not reached');
         return;
+    }
+    
+    // Don't clear if highlights are still valid for current position
+    if (!force && lastHighlightedFen) {
+        const FenUtil = new FenUtils();
+        const currentFen = FenUtil.getFen();
+        if (currentFen === lastHighlightedFen) {
+            Interface.log('Highlights still valid for current position, skipping clear');
+            return;
+        }
     }
     
     Interface.log('Clearing board highlights (FEN changed)');
@@ -1237,8 +1259,20 @@ async function getBestMoves(request) {
 let mutationDebounceTimeout = null;
 const MUTATION_DEBOUNCE_MS = 0;
 
+// Track last processed FEN to avoid reacting to DOM noise
+let lastProcessedFen = null;
+
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
+        // Early FEN check - only process if position actually changed
+        const FenUtil = new FenUtils();
+        const currentFen = FenUtil.getFen();
+        
+        // If FEN hasn't changed, this is just DOM noise (hover, click, drag, animation)
+        if (currentFen === lastProcessedFen) {
+            return; // Ignore DOM noise
+        }
+        
         const significantMutations = mutationArr.filter(m => {
             const classList = m.target.classList;
             if (!classList) {
@@ -1269,6 +1303,9 @@ function observeNewMoves() {
         if (significantMutations.length === 0) {
             return;
         }
+
+        // Update processed FEN before processing
+        lastProcessedFen = currentFen;
 
         if (mutationDebounceTimeout) {
             clearTimeout(mutationDebounceTimeout);
@@ -1453,7 +1490,8 @@ async function loadEngineCode(engineName) {
 }
 
 async function loadChessEngine(callback) {
-    if (CURRENT_SITE == LICHESS_ORG && WEB_ENGINE_IDS.includes(engineIndex)) {
+    // Use iframe sandbox for ALL sites with web engines (fixes CSP issues on both Lichess and Chess.com)
+    if (WEB_ENGINE_IDS.includes(engineIndex)) {
         try {
             let engineName;
             if (engineIndex == 0) engineName = 'lozza.js';
@@ -1470,7 +1508,7 @@ async function loadChessEngine(callback) {
             createEngineInSandbox(engineCode, function(proxyEngine) {
                 engine = proxyEngine;
                 engine.postMessage('ucinewgame');
-                Interface.log('Loaded chess engine in sandbox (Lichess)!');
+                Interface.log('Loaded chess engine in sandbox!');
                 callback();
             });
         } catch (e) {

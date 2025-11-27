@@ -139,6 +139,12 @@ var activeSiteMoveHighlights = [];
 
 // Track the last FEN when highlights were shown to prevent premature clearing
 var lastHighlightedFen = null;
+var lastHighlightTime = 0;
+const MIN_HIGHLIGHT_DISPLAY_MS = 500; // Show highlights for at least 500ms
+
+// Request throttling to prevent excessive analysis requests
+var lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL_MS = 200; // Max 5 requests per second
 
 // Minimum depth threshold for quality warning
 const MIN_DEPTH_THRESHOLD = 10;
@@ -232,11 +238,12 @@ function moveResult(from, to, power, clear = true, depth = null) {
     }
 
     if (clear) {
-        clearBoard();
+        clearBoard(true); // Force clear for new move result
     }
 
-    // Track the FEN when highlights are shown (lastFen is set by updateBestMove before this is called)
+    // Track the FEN and time when highlights are shown (lastFen is set by updateBestMove before this is called)
     lastHighlightedFen = lastFen;
+    lastHighlightTime = Date.now();
 
     if (!forcedBestMove) {
         if (isPlayerTurn) // my turn
@@ -1255,6 +1262,14 @@ function sendBestMove() {
 }
 
 function sendBestMoveRequest() {
+    // Throttle requests to prevent excessive analysis in fast games
+    const now = Date.now();
+    if (now - lastRequestTime < MIN_REQUEST_INTERVAL_MS) {
+        Interface.log('Request throttled - too soon since last request');
+        return;
+    }
+    lastRequestTime = now;
+    
     const FenUtil = new FenUtils();
     let currentFen = FenUtil.getFen();
     possible_moves = [];
@@ -1278,7 +1293,24 @@ function sendBestMoveRequest() {
 
 
 
-function clearBoard() {
+function clearBoard(force = false) {
+    // Don't clear highlights if they were just shown, unless forced
+    const now = Date.now();
+    if (!force && now - lastHighlightTime < MIN_HIGHLIGHT_DISPLAY_MS) {
+        Interface.log('Skipping highlight clear - minimum display time not reached');
+        return;
+    }
+    
+    // Don't clear if highlights are still valid for current position
+    if (!force && lastHighlightedFen) {
+        const FenUtil = new FenUtils();
+        const currentFen = FenUtil.getFen();
+        if (currentFen === lastHighlightedFen) {
+            Interface.log('Highlights still valid for current position, skipping clear');
+            return;
+        }
+    }
+    
     Interface.log('Clearing board highlights (FEN changed)');
     Interface.stopBestMoveProcessingAnimation();
 
@@ -1410,8 +1442,20 @@ function getBestMoves(request) {
 let mutationDebounceTimeout = null;
 const MUTATION_DEBOUNCE_MS = 0; // No debounce - respond immediately for faster bullet games
 
+// Track last processed FEN to avoid reacting to DOM noise
+let lastProcessedFen = null;
+
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
+        // Early FEN check - only process if position actually changed
+        const FenUtil = new FenUtils();
+        const currentFen = FenUtil.getFen();
+        
+        // If FEN hasn't changed, this is just DOM noise (hover, click, drag, animation)
+        if (currentFen === lastProcessedFen) {
+            return; // Ignore DOM noise
+        }
+        
         // Filter out transient mutations (hover, click, drag states, ghost pieces, animations)
         const significantMutations = mutationArr.filter(m => {
             // Ensure target has classList before checking
@@ -1450,6 +1494,9 @@ function observeNewMoves() {
         if (significantMutations.length === 0) {
             return;
         }
+
+        // Update processed FEN before processing
+        lastProcessedFen = currentFen;
 
         // Clear any pending debounce operation
         if (mutationDebounceTimeout) {
@@ -2665,8 +2712,8 @@ function createEngineInSandbox(engineCode, callback) {
 }
 
 function loadChessEngine(callback) {
-    // For Lichess with web engines, use iframe sandbox to bypass CSP
-    if (CURRENT_SITE == LICHESS_ORG && WEB_ENGINE_IDS.includes(engineIndex)) {
+    // Use iframe sandbox for ALL sites with web engines (fixes CSP issues on both Lichess and Chess.com)
+    if (WEB_ENGINE_IDS.includes(engineIndex)) {
         try {
             let engineCode;
             if (engineIndex == 0) engineCode = GM_getResourceText('lozza.js');
@@ -2676,7 +2723,7 @@ function loadChessEngine(callback) {
             createEngineInSandbox(engineCode, function(proxyEngine) {
                 engine = proxyEngine;
                 engine.postMessage('ucinewgame');
-                Interface.log('Loaded chess engine in sandbox (Lichess)!');
+                Interface.log('Loaded chess engine in sandbox!');
                 callback();
             });
         } catch (e) {
@@ -2693,6 +2740,7 @@ function loadChessEngine(callback) {
         return callback();
     }
 
+    // Fallback to direct Worker creation (may fail on sites with strict CSP)
     if (!engineObjectURL) {
         if (engineIndex == 0)
             engineObjectURL = URL.createObjectURL(new Blob([GM_getResourceText('lozza.js')], { type: 'application/javascript' }));
