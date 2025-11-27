@@ -1281,8 +1281,8 @@ function updateBoard(clear = true) {
         Interface.boardUtils.updateBoardPower(myScore, enemyScore);
     }
 
-    isPlayerTurn = playerColor == null || last_turn == null || last_turn == playerColor;
-
+    isPlayerTurn = playerColor == null || last_turn == null || last_turn !== playerColor;
+    Interface.log(`Turn calculation: playerColor=${playerColor}, last_turn=${last_turn}, isPlayerTurn=${isPlayerTurn}`);
 
     Interface.boardUtils.updateBoardFen(currentFen);
 }
