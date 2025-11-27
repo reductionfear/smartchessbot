@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   
   document.getElementById('open-gui').addEventListener('click', () => {
-    sendMessageToContentScript({ action: 'openGui' });
+    chrome.runtime.openOptionsPage();
     window.close();
   });
   
