@@ -1358,8 +1358,10 @@ function reloadChessEngine(forced, callback) {
         reload_count = 1;
         Interface.log(`Reloading the chess engine!`);
 
-        if (engine)
+        if (engine) {
             engine.terminate();
+            engine = null;  // Clear the reference to prevent stale state
+        }
 
         loadChessEngine(callback);
     }
@@ -1438,8 +1440,9 @@ function createEngineInSandbox(engineCode, callback) {
         terminate: function() {
             iframe.contentWindow.postMessage({ type: 'terminate' }, '*');
             iframe.remove();
-            if (this._cleanup) {
-                this._cleanup();
+            // Always remove the message handler to prevent leaks
+            if (this._messageHandler) {
+                window.removeEventListener('message', this._messageHandler);
             }
         },
         onmessage: null
