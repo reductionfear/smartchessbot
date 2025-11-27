@@ -160,6 +160,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendBestMove();
         }
         sendResponse({ success: true });
+    } else if (request.action === 'refreshHighlights') {
+        if (chessBoardElem && Interface) {
+            refreshHighlights();
+        }
+        sendResponse({ success: true });
     }
     return true;
 });
@@ -1004,11 +1009,37 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
 }
 
 function removeSiteMoveMarkings() {
+    // Remove tracked elements
     activeSiteMoveHighlights.forEach(elem => {
         elem?.remove();
     });
-
     activeSiteMoveHighlights = [];
+    
+    // Also clean up any orphaned highlight elements that might have been missed
+    document.querySelectorAll('.custom.highlight').forEach(elem => {
+        elem.remove();
+    });
+}
+
+/**
+ * Force a complete refresh of highlights - useful when highlights get into a bad state
+ * This clears all existing highlights and re-triggers analysis for the current position
+ */
+function refreshHighlights() {
+    // Force clear all existing highlights
+    clearBoard(true); // Pass true to force clear
+    
+    // Reset tracking variables
+    lastHighlightedFen = null;
+    lastHighlightTime = 0;
+    
+    // Reset lastFen so updateBestMove thinks position changed
+    lastFen = null;
+    
+    // Re-analyze and re-draw highlights for current position
+    updateBestMove(null); // Trigger re-analysis
+    
+    Interface.log('Highlights refreshed');
 }
 
 
