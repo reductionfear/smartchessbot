@@ -427,9 +427,13 @@ function getLichessCloudBestMoves(request) {
 function getNodeBestMoves(request) {
     // Apply bullet depth if bullet mode is enabled
     const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
+    const effectiveMovetime = bullet_mode ? Math.min(current_movetime, 200) : current_movetime;
+    
+    // Add bullet_mode parameter to URL
+    const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
     
     // Construct full URL for logging and debugging
-    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name;
+    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name + bulletParam;
     Interface.log(`Node Server request URL: ${fullUrl}`);
 
     GM_xmlhttpRequest({
