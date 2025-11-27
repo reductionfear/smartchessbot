@@ -2469,12 +2469,28 @@ function createEngineInSandbox(engineCode, callback) {
         terminate: function() {
             iframe.contentWindow.postMessage({ type: 'terminate' }, '*');
             iframe.remove();
+            // Clean up message listener to prevent memory leaks
+            if (this._cleanup) {
+                this._cleanup();
+            }
         },
         onmessage: null
     };
     
     // Listen for messages from iframe
+    // Note: We validate message types but cannot restrict origin since userscripts
+    // operate in a complex environment where the iframe origin may be 'null' or vary
     const messageHandler = function(e) {
+        // Only handle expected message types from the engine sandbox
+        if (!e.data || typeof e.data.type !== 'string') {
+            return;
+        }
+        
+        // Validate source is our iframe when possible
+        if (e.source !== iframe.contentWindow) {
+            return;
+        }
+        
         if (e.data.type === 'ready') {
             callback(proxyEngine);
         } else if (e.data.type === 'engine-message' && proxyEngine.onmessage) {
@@ -2486,7 +2502,7 @@ function createEngineInSandbox(engineCode, callback) {
     // Store messageHandler reference for cleanup
     proxyEngine._messageHandler = messageHandler;
     proxyEngine._cleanup = function() {
-        window.removeEventListener('message', proxyEngine._messageHandler);
+        window.removeEventListener('message', this._messageHandler);
     };
     
     // Wait for iframe to load and set up message handling
