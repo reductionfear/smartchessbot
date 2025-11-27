@@ -121,6 +121,8 @@ var activeGuiMoveHighlights = [];
 var activeSiteMoveHighlights = [];
 
 var lastHighlightedFen = null;
+var lastHighlightTime = 0;
+const MIN_HIGHLIGHT_DISPLAY_MS = 500; // Show highlights for at least 500ms
 
 const MIN_DEPTH_THRESHOLD = 10;
 
@@ -258,10 +260,11 @@ function moveResult(from, to, power, clear = true, depth = null) {
     }
 
     if (clear) {
-        clearBoard();
+        clearBoard(true); // Force clear for new move result
     }
 
     lastHighlightedFen = lastFen;
+    lastHighlightTime = Date.now();
 
     if (!forcedBestMove) {
         if (isPlayerTurn)
@@ -287,6 +290,18 @@ function moveResult(from, to, power, clear = true, depth = null) {
         Interface.boardUtils.markMove(possible_moves[a].slice(0, 2), possible_moves[a].slice(2, 4), color);
     }
 
+    // Send analysis result to popup
+    const move = from + to;
+    try {
+        chrome.runtime.sendMessage({
+            type: 'analysisComplete',
+            move: move,
+            depth: depth,
+            score: power
+        });
+    } catch (e) {
+        // Popup may not be open, ignore error
+    }
 
     Interface.stopBestMoveProcessingAnimation();
 }
@@ -579,6 +594,7 @@ function FenUtils() {
                 pieceColor = 'black';
             }
             
+            // Check for exact class matches first
             for (const type of PIECE_TYPES) {
                 if (classList.includes(type)) {
                     pieceName = type;
@@ -586,18 +602,25 @@ function FenUtils() {
                 }
             }
             
+            // Fallback: check className string for partial matches
             if (!pieceColor || !pieceName) {
                 const classStr = pieceElem.className.toLowerCase();
-                if (classStr.includes('white')) {
-                    pieceColor = 'white';
-                } else if (classStr.includes('black')) {
-                    pieceColor = 'black';
+                if (!pieceColor) {
+                    if (classStr.includes('white')) {
+                        pieceColor = 'white';
+                    } else if (classStr.includes('black')) {
+                        pieceColor = 'black';
+                    }
                 }
                 
-                for (const type of PIECE_TYPES) {
-                    if (classStr.includes(type)) {
-                        pieceName = type;
-                        break;
+                if (!pieceName) {
+                    // Check in specific order to avoid substring issues
+                    // 'knight' must be checked before generic letter matching
+                    for (const type of PIECE_TYPES) {
+                        if (classStr.includes(type)) {
+                            pieceName = type;
+                            break;
+                        }
                     }
                 }
             }
@@ -606,11 +629,19 @@ function FenUtils() {
                 return null;
             }
 
-            if (pieceName == "knight") {
-                pieceName = "n"
+            // Convert piece type to single character FEN notation
+            let pieceChar;
+            switch(pieceName) {
+                case 'knight': pieceChar = 'n'; break;
+                case 'bishop': pieceChar = 'b'; break;
+                case 'king': pieceChar = 'k'; break;
+                case 'queen': pieceChar = 'q'; break;
+                case 'rook': pieceChar = 'r'; break;
+                case 'pawn': pieceChar = 'p'; break;
+                default: pieceChar = pieceName[0]; break;
             }
 
-            let pieceText = pieceColor[0] + pieceName[0];
+            let pieceText = pieceColor[0] + pieceChar;
             return this.pieceCodeToFen(pieceText)
         }
     }
@@ -1063,7 +1094,14 @@ function sendBestMoveRequest() {
 
 
 
-function clearBoard() {
+function clearBoard(force = false) {
+    // Don't clear highlights if they were just shown, unless forced
+    const now = Date.now();
+    if (!force && now - lastHighlightTime < MIN_HIGHLIGHT_DISPLAY_MS) {
+        Interface.log('Skipping highlight clear - minimum display time not reached');
+        return;
+    }
+    
     Interface.log('Clearing board highlights (FEN changed)');
     Interface.stopBestMoveProcessingAnimation();
 
