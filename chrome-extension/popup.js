@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Set node server settings
   document.getElementById('node-url').value = settings.node_engine_url || 'http://localhost:5000';
-  document.getElementById('node-engine').value = settings.node_engine_name || 'stockfish.exe';
+  document.getElementById('node-engine').value = settings.node_engine_name || 'stockfish-15'; // Platform-agnostic
   
   // Show/hide node settings based on engine selection
   toggleNodeSettings(parseInt(engineSelect.value));

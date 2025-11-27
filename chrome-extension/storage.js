@@ -22,7 +22,9 @@ const Storage = {
 
   async remove(key) {
     return new Promise((resolve) => {
-      chrome.storage.local.remove([key], resolve);
+      // Handle both string and array inputs
+      const keys = Array.isArray(key) ? key : [key];
+      chrome.storage.local.remove(keys, resolve);
     });
   },
 

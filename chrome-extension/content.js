@@ -33,7 +33,7 @@ var displayMovesOnSite = false;
 var show_opposite_moves = false;
 var use_book_moves = false;
 var node_engine_url = "http://localhost:5000";
-var node_engine_name = "stockfish-15.exe";
+var node_engine_name = "stockfish-15"; // Platform-agnostic engine name (no .exe extension)
 var current_depth = Math.round(MAX_DEPTH / 2);
 var current_movetime = Math.round(MAX_MOVETIME / 3);
 var max_best_moves = Math.floor(current_depth / 2);
@@ -175,8 +175,10 @@ function updateSettingFromPopup(key, value) {
 }
 
 
+// Note: This function was used in the userscript for Firefox compatibility
+// Chrome extensions only run in Chromium-based browsers, so this always returns false
 function isNotCompatibleBrowser() {
-    return navigator.userAgent.toLowerCase().includes("firefox");
+    return false; // Chrome extensions don't support Firefox
 }
 
 // Start function
@@ -1083,7 +1085,7 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function getBestMoves(request) {
+async function getBestMoves(request) {
     if (CURRENT_SITE === LICHESS_ORG && engineIndex === lichess_cloud_engine_id) {
         getLichessCloudBestMoves(request);
         return;
@@ -1095,8 +1097,19 @@ function getBestMoves(request) {
     }
 
     if (WEB_ENGINE_IDS.includes(engineIndex)) {
-        while (!engine) {
-            sleep(100);
+        // Wait for engine to load with timeout
+        const MAX_WAIT_TIME = 5000; // 5 seconds max
+        const CHECK_INTERVAL = 100;
+        let waitTime = 0;
+        
+        while (!engine && waitTime < MAX_WAIT_TIME) {
+            await sleep(CHECK_INTERVAL);
+            waitTime += CHECK_INTERVAL;
+        }
+        
+        if (!engine) {
+            Interface.log('Error: Engine failed to load within timeout');
+            return;
         }
 
         const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
