@@ -1131,11 +1131,15 @@ function updateBestMove(mutationArr) {
         
         lastFen = currentFen;
         
-        // Only clear highlights when FEN actually changes
+        // Only clear highlights when FEN actually changes AND they're for a different position
         // This prevents highlights from disappearing on click/hover events
         if (lastHighlightedFen && currentFen !== lastHighlightedFen) {
             clearBoard();
             lastHighlightedFen = null;
+        } else if (currentFen === lastHighlightedFen) {
+            // Already showing correct highlights for this position, don't re-analyze
+            Interface.log(`Highlights already correct for current position, skipping analysis`);
+            return;
         }
 
 
@@ -1176,7 +1180,9 @@ function updateBestMove(mutationArr) {
 
 
 function sendBestMove() {
+    Interface.log(`sendBestMove: isPlayerTurn=${isPlayerTurn}, playerColor=${playerColor}, last_turn=${last_turn}`);
     if (!isPlayerTurn && !show_opposite_moves) {
+        Interface.log('Skipping analysis - not player turn');
         return;
     }
 
@@ -1258,14 +1264,14 @@ function getBestMoves(request) {
         return;
     }
 
-    // Use Node server for Lichess.org (if not using Lichess Cloud) or when node engine selected
-    if (engineIndex === node_engine_id || CURRENT_SITE === LICHESS_ORG) {
+    // Use Node server when node engine is selected
+    if (engineIndex === node_engine_id) {
         getNodeBestMoves(request);
         return;
     }
 
-    // Local engines for Chess.com
-    if (engineIndex !== node_engine_id && CURRENT_SITE !== LICHESS_ORG) {
+    // Local/web engines (works for Chess.com and Lichess via iframe sandbox)
+    if (WEB_ENGINE_IDS.includes(engineIndex)) {
         // local engines
         while (!engine) {
             sleep(100);
@@ -1325,7 +1331,7 @@ function getBestMoves(request) {
 
 // Debounce timeout for mutation observer to prevent rapid clearing
 let mutationDebounceTimeout = null;
-const MUTATION_DEBOUNCE_MS = 100;
+const MUTATION_DEBOUNCE_MS = 10;
 
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
@@ -2113,28 +2119,14 @@ function openGUI() {
 
 
         if (CURRENT_SITE == LICHESS_ORG) {
-            // On Lichess: disable web engines due to CSP issues, but enable Lichess Cloud
-            engineElem.childNodes.forEach(elem => {
-                if (elem.id == "web-engine") {
-                    elem.disabled = true;
-                }
-                // Lichess Cloud and Node Server are available on Lichess
-                if (elem.id == "lichess-cloud-engine" || elem.id == "local-engine") {
-                    elem.disabled = false;
-                }
-            })
+            // On Lichess: web engines now work via iframe sandbox, enable all engines
+            // Lichess Cloud and Node Server are also available on Lichess
 
             if (!isNotCompatibleBrowser()) {
                 Gui.document.querySelector('#chessboard').remove();
                 Gui.document.querySelector('#orientation').remove();
             }
 
-            // Default to Lichess Cloud engine on Lichess.org if no saved preference or using web engine
-            // Default to Lichess Cloud engine if currently using an incompatible web engine
-            if (WEB_ENGINE_IDS.includes(engineIndex)) {
-                engineIndex = lichess_cloud_engine_id;
-                GM_setValue(dbValues.engineIndex, engineIndex);
-            }
             engineElem.selectedIndex = engineIndex;
 
             // Show/hide appropriate divs based on selected engine
@@ -2143,10 +2135,16 @@ function openGUI() {
                 engineNameDivElem.style.display = "none";
                 reloadEngineDivElem.style.display = "none";
                 Gui.document.querySelector('#lichess-cloud-info').style.display = "block";
-            } else {
+            } else if (engineIndex === node_engine_id) {
                 maxMovesDivElem.style.display = "none";
                 engineNameDivElem.style.display = "block";
                 reloadEngineDivElem.style.display = "none";
+                Gui.document.querySelector('#lichess-cloud-info').style.display = "none";
+            } else {
+                // Web engines (Lozza, Stockfish 5, Stockfish 2018)
+                maxMovesDivElem.style.display = "block";
+                engineNameDivElem.style.display = "none";
+                reloadEngineDivElem.style.display = "block";
                 Gui.document.querySelector('#lichess-cloud-info').style.display = "none";
             }
         } else {
@@ -2415,10 +2413,110 @@ function reloadChessEngine(forced, callback) {
 }
 
 
+// Create engine in iframe sandbox to bypass Lichess CSP restrictions
+function createEngineInSandbox(engineCode, callback) {
+    // Create iframe with relaxed CSP
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.sandbox = 'allow-scripts';
+    
+    // Create the iframe content that will host the worker
+    const iframeContent = `
+        <!DOCTYPE html>
+        <html>
+        <head><title>Engine Sandbox</title></head>
+        <body>
+        <script>
+            let worker = null;
+            
+            window.addEventListener('message', function(e) {
+                if (e.data.type === 'init') {
+                    // Create worker from the engine code
+                    const blob = new Blob([e.data.engineCode], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    worker = new Worker(url);
+                    
+                    worker.onmessage = function(workerEvent) {
+                        parent.postMessage({ type: 'engine-message', data: workerEvent.data }, '*');
+                    };
+                    
+                    parent.postMessage({ type: 'ready' }, '*');
+                } else if (e.data.type === 'command') {
+                    if (worker) {
+                        worker.postMessage(e.data.command);
+                    }
+                } else if (e.data.type === 'terminate') {
+                    if (worker) {
+                        worker.terminate();
+                        worker = null;
+                    }
+                }
+            });
+        <\/script>
+        </body>
+        </html>
+    `;
+    
+    iframe.srcdoc = iframeContent;
+    document.body.appendChild(iframe);
+    
+    // Create a proxy engine object
+    const proxyEngine = {
+        iframe: iframe,
+        postMessage: function(msg) {
+            iframe.contentWindow.postMessage({ type: 'command', command: msg }, '*');
+        },
+        terminate: function() {
+            iframe.contentWindow.postMessage({ type: 'terminate' }, '*');
+            iframe.remove();
+        },
+        onmessage: null
+    };
+    
+    // Listen for messages from iframe
+    const messageHandler = function(e) {
+        if (e.data.type === 'ready') {
+            callback(proxyEngine);
+        } else if (e.data.type === 'engine-message' && proxyEngine.onmessage) {
+            proxyEngine.onmessage({ data: e.data.data });
+        }
+    };
+    window.addEventListener('message', messageHandler);
+    
+    // Store messageHandler reference for cleanup
+    proxyEngine._messageHandler = messageHandler;
+    proxyEngine._cleanup = function() {
+        window.removeEventListener('message', proxyEngine._messageHandler);
+    };
+    
+    // Wait for iframe to load and set up message handling
+    iframe.onload = function() {
+        // Send engine code to iframe
+        iframe.contentWindow.postMessage({ type: 'init', engineCode: engineCode }, '*');
+    };
+    
+    return proxyEngine;
+}
 
 function loadChessEngine(callback) {
-    // Skip local engine loading for Lichess.org and Lichess Cloud engine
-    if (CURRENT_SITE == LICHESS_ORG || engineIndex == lichess_cloud_engine_id || engineIndex == node_engine_id) {
+    // For Lichess with web engines, use iframe sandbox to bypass CSP
+    if (CURRENT_SITE == LICHESS_ORG && WEB_ENGINE_IDS.includes(engineIndex)) {
+        let engineCode;
+        if (engineIndex == 0) engineCode = GM_getResourceText('lozza.js');
+        else if (engineIndex == 1) engineCode = GM_getResourceText('stockfish-5.js');
+        else if (engineIndex == 2) engineCode = GM_getResourceText('stockfish-2018.js');
+        
+        createEngineInSandbox(engineCode, function(proxyEngine) {
+            engine = proxyEngine;
+            engine.postMessage('ucinewgame');
+            Interface.log('Loaded chess engine in sandbox (Lichess)!');
+            callback();
+        });
+        return;
+    }
+    
+    // Skip local engine loading for Lichess Cloud engine and Node server
+    if (engineIndex == lichess_cloud_engine_id || engineIndex == node_engine_id) {
         return callback();
     }
 
