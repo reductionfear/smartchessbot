@@ -67,6 +67,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.runtime.onMessage.addListener((request) => {
     if (request.action === 'statusUpdate') {
       updateStatus(request.status);
+    } else if (request.type === 'analysisComplete') {
+      updateStatus(`Best: ${request.move}`, 'success');
     }
   });
 });
@@ -76,8 +78,14 @@ function toggleNodeSettings(engineIndex) {
   nodeSettings.style.display = engineIndex === 3 ? 'block' : 'none';
 }
 
-function updateStatus(text) {
-  document.getElementById('status').textContent = text;
+function updateStatus(text, className = '') {
+  const statusElem = document.getElementById('status');
+  statusElem.textContent = text;
+  // Reset classes and apply new class if provided
+  statusElem.className = 'status';
+  if (className) {
+    statusElem.classList.add(className);
+  }
 }
 
 async function sendMessageToContentScript(message) {
