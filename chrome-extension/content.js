@@ -300,7 +300,11 @@ function moveResult(from, to, power, clear = true, depth = null) {
             score: power
         });
     } catch (e) {
-        // Popup may not be open, ignore error
+        // Expected when popup is not open - chrome.runtime.lastError is set
+        // Only log unexpected errors
+        if (e.message && !e.message.includes('receiving end does not exist')) {
+            console.warn('[SmartChessBot] Error sending message to popup:', e.message);
+        }
     }
 
     Interface.stopBestMoveProcessingAnimation();
@@ -614,8 +618,7 @@ function FenUtils() {
                 }
                 
                 if (!pieceName) {
-                    // Check in specific order to avoid substring issues
-                    // 'knight' must be checked before generic letter matching
+                    // Check for exact piece type matches
                     for (const type of PIECE_TYPES) {
                         if (classStr.includes(type)) {
                             pieceName = type;
@@ -638,7 +641,9 @@ function FenUtils() {
                 case 'queen': pieceChar = 'q'; break;
                 case 'rook': pieceChar = 'r'; break;
                 case 'pawn': pieceChar = 'p'; break;
-                default: pieceChar = pieceName[0]; break;
+                default:
+                    console.warn('[SmartChessBot] Unknown piece type:', pieceName);
+                    return null;
             }
 
             let pieceText = pieceColor[0] + pieceChar;
