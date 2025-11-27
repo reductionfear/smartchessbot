@@ -289,16 +289,28 @@ function getBookMoves(request) {
         },
         onload: function (response) {
             if (response.response.includes("error") || !response.ok) {
+                // Check if response is stale
                 if (lastBestMoveID != request.id) {
-                    Interface.log('Ignoring stale book move response');
-                    return;
+                    // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                    if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                        Interface.log('Book move check stale (1 move behind), falling back to engine - Bullet Mode');
+                    } else {
+                        Interface.log('Ignoring stale book move response');
+                        return;
+                    }
                 }
                 Interface.log('No book move found, using engine analysis...');
                 getBestMoves(request);
             } else {
+                // Check if response is stale
                 if (lastBestMoveID != request.id) {
-                    Interface.log('Ignoring stale book move response');
-                    return;
+                    // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                    if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                        Interface.log('Showing book move (1 move behind) - Bullet Mode');
+                    } else {
+                        Interface.log('Ignoring stale book move response');
+                        return;
+                    }
                 }
 
                 let data = JSON.parse(response.response);
@@ -313,8 +325,14 @@ function getBookMoves(request) {
 
 
         }, onerror: function (error) {
+            // Check if response is stale
             if (lastBestMoveID != request.id) {
-                return;
+                // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                    Interface.log('Book move error stale (1 move behind), falling back to engine - Bullet Mode');
+                } else {
+                    return;
+                }
             }
             getBestMoves(request);
 
