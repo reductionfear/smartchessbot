@@ -1175,11 +1175,37 @@ function markMoveToSite(fromSquare, toSquare, rgba_color) {
 }
 
 function removeSiteMoveMarkings() {
+    // Remove tracked elements
     activeSiteMoveHighlights.forEach(elem => {
         elem?.remove();
     });
-
     activeSiteMoveHighlights = [];
+    
+    // Also clean up any orphaned highlight elements that might have been missed
+    document.querySelectorAll('.custom.highlight').forEach(elem => {
+        elem.remove();
+    });
+}
+
+/**
+ * Force a complete refresh of highlights - useful when highlights get into a bad state
+ * This clears all existing highlights and re-triggers analysis for the current position
+ */
+function refreshHighlights() {
+    // Force clear all existing highlights
+    clearBoard(true); // Pass true to force clear
+    
+    // Reset tracking variables
+    lastHighlightedFen = null;
+    lastHighlightTime = 0;
+    
+    // Reset lastFen so updateBestMove thinks position changed
+    lastFen = null;
+    
+    // Re-analyze and re-draw highlights for current position
+    updateBestMove(null); // Trigger re-analysis
+    
+    Interface.log('Highlights refreshed');
 }
 
 
@@ -1544,6 +1570,7 @@ function addGuiPages() {
             </div>
             <div id="orientation" class="hidden"></div>
             <div class="card-footer sideways-card"><input class="btn" type="button" value="Get Best Move" id="bestmove-btn"></input></div>
+            <div class="card-footer sideways-card"><input class="btn" type="button" value="Refresh Highlights" id="refresh-highlights-btn"></input></div>
             <div class="card-footer sideways-card">FEN :<div id="fen"></div></div>
             <div class="card-footer sideways-card">ENEMY SCORE :<div id="enemy-score"></div></div>
             <div class="card-footer sideways-card">MY SCORE : <div id="my-score"></div></div>
@@ -2162,6 +2189,7 @@ function openGUI() {
         const enableEngineLogElem = Gui.document.querySelector('#enable-engine-log');
         const eloElem = Gui.document.querySelector('#elo');
         const getBestMoveElem = Gui.document.querySelector('#bestmove-btn');
+        const refreshHighlightsElem = Gui.document.querySelector('#refresh-highlights-btn');
         const nightModeElem = Gui.document.querySelector('#night-mode');
         const tutoElem = Gui.document.querySelector('#tuto');
         const resetElem = Gui.document.querySelector('#reset-settings');
@@ -2349,6 +2377,10 @@ function openGUI() {
 
             updateBoard();
             sendBestMove();
+        }
+
+        refreshHighlightsElem.onclick = () => {
+            refreshHighlights();
         }
 
         engineModeElem.onchange = () => {
