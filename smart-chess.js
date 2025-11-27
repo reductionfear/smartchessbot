@@ -71,6 +71,11 @@ var current_movetime = Math.round(MAX_MOVETIME / 3);        // current engine mo
 var max_best_moves = Math.floor(current_depth / 2);
 var bestMoveColors = [];
 
+// Bullet mode settings for fast games
+var bullet_mode = false;                                    // enable bullet mode for faster response
+var bullet_depth = 8;                                       // lower depth for faster response in bullet mode
+var show_stale_moves = true;                                // show moves even if position changed by 1 move
+
 var lastBestMoveID = 0;
 
 
@@ -91,7 +96,10 @@ const dbValues = {
     current_depth: "current_depth",
     current_movetime: "current_movetime",
     max_best_moves: "max_best_moves",
-    bestMoveColors: "bestMoveColors"
+    bestMoveColors: "bestMoveColors",
+    bullet_mode: "bullet_mode",
+    bullet_depth: "bullet_depth",
+    show_stale_moves: "show_stale_moves"
 };
 
 
@@ -281,16 +289,28 @@ function getBookMoves(request) {
         },
         onload: function (response) {
             if (response.response.includes("error") || !response.ok) {
+                // Check if response is stale
                 if (lastBestMoveID != request.id) {
-                    Interface.log('Ignoring stale book move response');
-                    return;
+                    // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                    if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                        Interface.log('Book move check stale (1 move behind), falling back to engine - Bullet Mode');
+                    } else {
+                        Interface.log('Ignoring stale book move response');
+                        return;
+                    }
                 }
                 Interface.log('No book move found, using engine analysis...');
                 getBestMoves(request);
             } else {
+                // Check if response is stale
                 if (lastBestMoveID != request.id) {
-                    Interface.log('Ignoring stale book move response');
-                    return;
+                    // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                    if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                        Interface.log('Showing book move (1 move behind) - Bullet Mode');
+                    } else {
+                        Interface.log('Ignoring stale book move response');
+                        return;
+                    }
                 }
 
                 let data = JSON.parse(response.response);
@@ -305,8 +325,14 @@ function getBookMoves(request) {
 
 
         }, onerror: function (error) {
+            // Check if response is stale
             if (lastBestMoveID != request.id) {
-                return;
+                // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                    Interface.log('Book move error stale (1 move behind), falling back to engine - Bullet Mode');
+                } else {
+                    return;
+                }
             }
             getBestMoves(request);
 
@@ -330,9 +356,15 @@ function getLichessCloudBestMoves(request) {
             "Content-Type": "application/json"
         },
         onload: function (response) {
+            // Check if response is stale
             if (lastBestMoveID != request.id) {
-                Interface.log('Ignoring stale response (request ID mismatch)');
-                return;
+                // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                    Interface.log('Showing previous analysis (1 move behind) - Bullet Mode');
+                } else {
+                    Interface.log('Ignoring stale response (request ID mismatch)');
+                    return;
+                }
             }
 
             Interface.log('Received response from Lichess Cloud API');
@@ -393,8 +425,11 @@ function getLichessCloudBestMoves(request) {
 }
 
 function getNodeBestMoves(request) {
+    // Apply bullet depth if bullet mode is enabled
+    const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
+    
     // Construct full URL for logging and debugging
-    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + current_depth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name;
+    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + current_movetime + "&turn=" + (last_turn || turn) + "&engine_name=" + node_engine_name;
     Interface.log(`Node Server request URL: ${fullUrl}`);
 
     GM_xmlhttpRequest({
@@ -411,9 +446,15 @@ function getNodeBestMoves(request) {
                 return Interface.log("Error: " + result.data);
             }
 
+            // Check if response is stale
             if (lastBestMoveID != request.id) {
-                Interface.log('Ignoring stale response (request ID mismatch)');
-                return;
+                // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                    Interface.log('Showing previous analysis (1 move behind) - Bullet Mode');
+                } else {
+                    Interface.log('Ignoring stale response (request ID mismatch)');
+                    return;
+                }
             }
 
             Interface.log('Received response from Node Server');
@@ -429,7 +470,7 @@ function getNodeBestMoves(request) {
             // Log the actual depth achieved vs requested
             if (engineMode == DEPTH_MODE) {
                 Interface.updateBestMoveProgress(`Depth: ${depth}`);
-                Interface.log(`Analysis complete: requested depth ${current_depth}, achieved depth ${depth}`);
+                Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
             } else {
                 Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
                 Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
@@ -1278,32 +1319,41 @@ function getBestMoves(request) {
             sleep(100);
         }
 
-        Interface.log(`Using local engine (depth: ${current_depth}, movetime: ${current_movetime})...`);
+        // Apply bullet depth if bullet mode is enabled
+        const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
+
+        Interface.log(`Using local engine (depth: ${effectiveDepth}, movetime: ${current_movetime})...`);
 
         engine.postMessage(`position fen ${request.fen}`);
 
         if (engineMode == DEPTH_MODE) {
-            engine.postMessage('go depth ' + current_depth);
+            engine.postMessage('go depth ' + effectiveDepth);
         } else {
             engine.postMessage('go movetime ' + current_movetime);
         }
 
         // Track the achieved depth for reporting
-        let achievedDepth = current_depth;
+        let achievedDepth = effectiveDepth;
 
         engine.onmessage = e => {
+            // Check if response is stale
             if (lastBestMoveID != request.id) {
-                Interface.log('Ignoring stale engine response');
-                return;
+                // In bullet mode with show_stale_moves, allow responses that are just 1 move behind
+                if (bullet_mode && show_stale_moves && (lastBestMoveID - request.id <= 1)) {
+                    Interface.log('Showing previous analysis (1 move behind) - Bullet Mode');
+                } else {
+                    Interface.log('Ignoring stale engine response');
+                    return;
+                }
             }
             if (e.data.includes('bestmove')) {
                 let move = e.data.split(' ')[1];
                 Interface.log(`Analysis complete: depth ${achievedDepth}, move ${move}`);
                 // Pass achieved depth for depth warning
-                moveResult(move.slice(0, 2), move.slice(2, 4), current_depth, true, achievedDepth);
+                moveResult(move.slice(0, 2), move.slice(2, 4), effectiveDepth, true, achievedDepth);
             } else if (e.data.includes('info')) {
                 const infoObj = LozzaUtils.extractInfo(e.data);
-                achievedDepth = infoObj.depth || current_depth;
+                achievedDepth = infoObj.depth || effectiveDepth;
                 let move_time = infoObj.time || current_movetime;
 
                 // Limit possible_moves to max_best_moves
@@ -1332,7 +1382,7 @@ function getBestMoves(request) {
 
 // Debounce timeout for mutation observer to prevent rapid clearing
 let mutationDebounceTimeout = null;
-const MUTATION_DEBOUNCE_MS = 10;
+const MUTATION_DEBOUNCE_MS = 0; // No debounce - respond immediately for faster bullet games
 
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
@@ -1827,6 +1877,31 @@ function addGuiPages() {
         </div>
 
 
+        <div class="card">
+            <div class="card-body">
+                <h4 class="card-title">Bullet Mode (Fast Games):</h4>
+
+                <label class="container">Enable Bullet Mode
+                    <input type="checkbox" id="bullet-mode" ${bullet_mode == true ? 'checked' : ''}>
+                    <span class="checkmark"></span>
+                </label>
+
+                <div id="bullet-settings" style="display:${bullet_mode == true ? 'block' : 'none'};">
+                    <div>
+                        <label for="bullet-depth">Bullet Depth (lower = faster):</label>
+                        <input type="number" id="bullet-depth" min="1" max="10" value="${bullet_depth}">
+                    </div>
+
+                    <div class="space"></div>
+
+                    <label class="container">Show slightly stale moves
+                        <input type="checkbox" id="show-stale-moves" ${show_stale_moves == true ? 'checked' : ''}>
+                        <span class="checkmark"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
 
         <div class="card">
             <div class="card-body">
@@ -2017,6 +2092,12 @@ function openGUI() {
         const nightModeElem = Gui.document.querySelector('#night-mode');
         const tutoElem = Gui.document.querySelector('#tuto');
         const resetElem = Gui.document.querySelector('#reset-settings');
+        
+        // Bullet mode elements
+        const bulletModeElem = Gui.document.querySelector('#bullet-mode');
+        const bulletDepthElem = Gui.document.querySelector('#bullet-depth');
+        const bulletSettingsDivElem = Gui.document.querySelector('#bullet-settings');
+        const showStaleMovesElem = Gui.document.querySelector('#show-stale-moves');
 
 
 
@@ -2340,9 +2421,28 @@ function openGUI() {
             GM_setValue(dbValues.displayMovesOnSite, displayMovesOnSite);
         };
 
+        // Bullet mode event handlers
+        bulletModeElem.onchange = () => {
+            bullet_mode = bulletModeElem.checked;
 
+            if (bullet_mode) {
+                bulletSettingsDivElem.style.display = "block";
+            } else {
+                bulletSettingsDivElem.style.display = "none";
+            }
 
+            GM_setValue(dbValues.bullet_mode, bullet_mode);
+        };
 
+        bulletDepthElem.onchange = () => {
+            bullet_depth = parseInt(bulletDepthElem.value);
+            GM_setValue(dbValues.bullet_depth, bullet_depth);
+        };
+
+        showStaleMovesElem.onchange = () => {
+            show_stale_moves = showStaleMovesElem.checked;
+            GM_setValue(dbValues.show_stale_moves, show_stale_moves);
+        };
 
 
         window.onunload = () => {
@@ -2663,6 +2763,9 @@ async function initializeDatabase(callback) {
         await GM_setValue(dbValues.current_movetime, current_movetime);
         await GM_setValue(dbValues.max_best_moves, max_best_moves);
         await GM_setValue(dbValues.bestMoveColors, bestMoveColors);
+        await GM_setValue(dbValues.bullet_mode, bullet_mode);
+        await GM_setValue(dbValues.bullet_depth, bullet_depth);
+        await GM_setValue(dbValues.show_stale_moves, show_stale_moves);
 
         callback();
     } else {
@@ -2682,6 +2785,15 @@ async function initializeDatabase(callback) {
         current_movetime = await GM_getValue(dbValues.current_movetime);
         max_best_moves = await GM_getValue(dbValues.max_best_moves);
         bestMoveColors = await GM_getValue(dbValues.bestMoveColors);
+        
+        // Load bullet mode settings with defaults if not set
+        const storedBulletMode = await GM_getValue(dbValues.bullet_mode);
+        const storedBulletDepth = await GM_getValue(dbValues.bullet_depth);
+        const storedShowStaleMoves = await GM_getValue(dbValues.show_stale_moves);
+        
+        bullet_mode = storedBulletMode !== undefined ? storedBulletMode : bullet_mode;
+        bullet_depth = storedBulletDepth !== undefined ? storedBulletDepth : bullet_depth;
+        show_stale_moves = storedShowStaleMoves !== undefined ? storedShowStaleMoves : show_stale_moves;
 
         callback();
     }
