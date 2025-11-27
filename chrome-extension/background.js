@@ -1,5 +1,23 @@
 // Background service worker for Smart Chess Bot Chrome Extension
 
+// Helper function to safely check if a URL belongs to a chess site
+// Uses URL parsing to prevent URL spoofing attacks
+function isChessSiteUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    // Check for exact domain match or valid subdomains
+    return hostname === 'chess.com' || 
+           hostname === 'www.chess.com' || 
+           hostname.endsWith('.chess.com') ||
+           hostname === 'lichess.org' || 
+           hostname === 'www.lichess.org' ||
+           hostname.endsWith('.lichess.org');
+  } catch (e) {
+    return false;
+  }
+}
+
 // Listen for installation
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
@@ -39,8 +57,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Handle tab updates to detect chess sites
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
-    const isChessSite = tab.url.includes('chess.com') || tab.url.includes('lichess.org');
-    if (isChessSite) {
+    if (isChessSiteUrl(tab.url)) {
       console.log('Chess site detected:', tab.url);
     }
   }

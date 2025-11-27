@@ -1,6 +1,22 @@
 // Smart Chess Bot - Chrome Extension Content Script
 // Converted from userscript for Chrome extension compatibility
 
+// Helper function to safely check if the current page is a chess site
+// Uses URL parsing to prevent URL spoofing attacks
+function isOnChessSite(siteType) {
+  try {
+    const hostname = window.location.hostname.toLowerCase();
+    if (siteType === 'lichess') {
+      return hostname === 'lichess.org' || hostname === 'www.lichess.org' || hostname.endsWith('.lichess.org');
+    } else if (siteType === 'chess.com') {
+      return hostname === 'chess.com' || hostname === 'www.chess.com' || hostname.endsWith('.chess.com');
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
 // VARS
 const repositoryRawURL = 'https://raw.githubusercontent.com/sayfpack13/chess-analysis-bot/main/tampermonkey%20script';
 const LICHESS_API = "https://lichess.org/api/cloud-eval";
@@ -204,7 +220,7 @@ window.addEventListener('load', function() {
             return;
         }
 
-        if (window.location.href.includes("lichess.org")) {
+        if (isOnChessSite('lichess')) {
             const mainBoard = document.querySelector('.round__app__board.main-board');
             if (mainBoard && mainBoard.querySelector('piece')) {
                 CURRENT_SITE = LICHESS_ORG;
@@ -212,7 +228,7 @@ window.addEventListener('load', function() {
                 firstPieceElem = mainBoard.querySelector('piece');
             }
         }
-        else if (window.location.href.includes("chess.com")) {
+        else if (isOnChessSite('chess.com')) {
             const board = document.querySelector('.board');
             if (board && board.querySelector(".piece")) {
                 CURRENT_SITE = CHESS_COM;
