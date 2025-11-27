@@ -49,7 +49,8 @@ const MATE_SCORE = 10000;  // Score value for checkmate positions
 const rank = ["Beginner", "Intermediate", "Advanced", "Expert", "Master", "Grand Master"];
 // Web engine IDs (incompatible with Lichess due to CSP)
 const WEB_ENGINE_IDS = [0, 1, 2]; // Lozza, Stockfish 5, Stockfish 2018
-
+// Timeout for iframe sandbox engine initialization (in milliseconds)
+const ENGINE_INITIALIZATION_TIMEOUT = 5000;
 
 
 
@@ -2415,6 +2416,25 @@ function reloadChessEngine(forced, callback) {
 
 // Create engine in iframe sandbox to bypass Lichess CSP restrictions
 function createEngineInSandbox(engineCode, callback) {
+    // Add a timeout to prevent hanging if iframe fails to initialize
+    let callbackCalled = false;
+    const timeoutId = setTimeout(() => {
+        if (!callbackCalled) {
+            callbackCalled = true;
+            console.error('Engine sandbox initialization timed out');
+            // Create a dummy engine that does nothing so the app doesn't crash
+            callback({
+                postMessage: function(msg) {
+                    console.warn('Dummy engine: postMessage called with:', msg);
+                },
+                terminate: function() {
+                    console.warn('Dummy engine: terminate called');
+                },
+                onmessage: null
+            });
+        }
+    }, ENGINE_INITIALIZATION_TIMEOUT);
+
     // Create iframe with relaxed CSP
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
@@ -2492,7 +2512,11 @@ function createEngineInSandbox(engineCode, callback) {
         }
         
         if (e.data.type === 'ready') {
-            callback(proxyEngine);
+            if (!callbackCalled) {
+                callbackCalled = true;
+                clearTimeout(timeoutId);
+                callback(proxyEngine);
+            }
         } else if (e.data.type === 'engine-message' && proxyEngine.onmessage) {
             proxyEngine.onmessage({ data: e.data.data });
         }
@@ -2517,17 +2541,24 @@ function createEngineInSandbox(engineCode, callback) {
 function loadChessEngine(callback) {
     // For Lichess with web engines, use iframe sandbox to bypass CSP
     if (CURRENT_SITE == LICHESS_ORG && WEB_ENGINE_IDS.includes(engineIndex)) {
-        let engineCode;
-        if (engineIndex == 0) engineCode = GM_getResourceText('lozza.js');
-        else if (engineIndex == 1) engineCode = GM_getResourceText('stockfish-5.js');
-        else if (engineIndex == 2) engineCode = GM_getResourceText('stockfish-2018.js');
-        
-        createEngineInSandbox(engineCode, function(proxyEngine) {
-            engine = proxyEngine;
-            engine.postMessage('ucinewgame');
-            Interface.log('Loaded chess engine in sandbox (Lichess)!');
+        try {
+            let engineCode;
+            if (engineIndex == 0) engineCode = GM_getResourceText('lozza.js');
+            else if (engineIndex == 1) engineCode = GM_getResourceText('stockfish-5.js');
+            else if (engineIndex == 2) engineCode = GM_getResourceText('stockfish-2018.js');
+            
+            createEngineInSandbox(engineCode, function(proxyEngine) {
+                engine = proxyEngine;
+                engine.postMessage('ucinewgame');
+                Interface.log('Loaded chess engine in sandbox (Lichess)!');
+                callback();
+            });
+        } catch (e) {
+            console.error('Failed to create engine sandbox:', e);
+            Interface.log('Error loading engine: ' + e.message);
+            // Still call callback so GUI opens
             callback();
-        });
+        }
         return;
     }
     
@@ -2585,8 +2616,12 @@ function initialize() {
     initializeDatabase(() => {
         loadChessEngine(() => {
             updatePlayerColor(() => {
-                addGuiPages();
-                openGUI();
+                try {
+                    addGuiPages();
+                    openGUI();
+                } catch (e) {
+                    console.error('Error opening GUI:', e);
+                }
             });
         });
     });
