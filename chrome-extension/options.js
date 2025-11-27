@@ -173,7 +173,7 @@ function updateNightMode() {
 }
 
 // Update best move colors display
-function updateBestMoveColors() {
+async function updateBestMoveColors() {
   const container = document.getElementById('best-moves-colors');
   container.innerHTML = '';
   
@@ -184,6 +184,9 @@ function updateBestMoveColors() {
   
   // Trim excess colors
   settings.bestMoveColors = settings.bestMoveColors.slice(0, settings.max_best_moves);
+  
+  // Save the updated colors array
+  await chrome.storage.local.set({ [dbValues.bestMoveColors]: settings.bestMoveColors });
   
   settings.bestMoveColors.forEach((color, index) => {
     const div = document.createElement('div');
@@ -228,7 +231,7 @@ async function loadSettings() {
 }
 
 // Apply all settings to UI
-function applySettingsToUI() {
+async function applySettingsToUI() {
   // Engine selection
   document.getElementById('select-engine').value = settings.engineIndex;
   
@@ -267,7 +270,7 @@ function applySettingsToUI() {
   updateEngineSelectionDisplay();
   updateReloadEngineDisplay();
   updateBulletSettingsDisplay();
-  updateBestMoveColors();
+  await updateBestMoveColors();
 }
 
 // Initialize event listeners
@@ -290,7 +293,7 @@ function initEventListeners() {
           Object.entries(dbValues).map(([key, storageKey]) => [storageKey, settings[key]])
         )
       );
-      applySettingsToUI();
+      await applySettingsToUI();
     }
   });
   
@@ -326,7 +329,7 @@ function initEventListeners() {
       settings.max_best_moves = maxMoves;
       document.getElementById('max-moves').value = maxMoves;
       await saveSetting('max_best_moves', maxMoves);
-      updateBestMoveColors();
+      await updateBestMoveColors();
     }
     
     await saveSetting('current_depth', value);
@@ -347,7 +350,7 @@ function initEventListeners() {
       settings.max_best_moves = maxMoves;
       document.getElementById('max-moves').value = maxMoves;
       await saveSetting('max_best_moves', maxMoves);
-      updateBestMoveColors();
+      await updateBestMoveColors();
     }
     
     await saveSetting('current_depth', value);
@@ -378,8 +381,7 @@ function initEventListeners() {
     const value = parseInt(e.target.value);
     settings.max_best_moves = value;
     await saveSetting('max_best_moves', value);
-    updateBestMoveColors();
-    await chrome.storage.local.set({ [dbValues.bestMoveColors]: settings.bestMoveColors });
+    await updateBestMoveColors();
   });
   
   // Use book moves
@@ -447,6 +449,6 @@ function initEventListeners() {
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
-  applySettingsToUI();
+  await applySettingsToUI();
   initEventListeners();
 });
