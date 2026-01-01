@@ -434,76 +434,182 @@ function getNodeBestMoves(request) {
     const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
     const effectiveMovetime = bullet_mode ? bullet_movetime : current_movetime;
     
-    // Add bullet_mode parameter to URL
-    const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
-    
-    // Calculate the correct turn for the engine: last_turn is who just moved,
-    // so the engine should analyze for the opposite color (whose turn is next)
-    const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
-    
-    // Construct full URL for logging and debugging
-    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
-    Interface.log(`Node Server request URL: ${fullUrl}`);
-
-    GM_xmlhttpRequest({
-        method: "GET",
-        url: fullUrl,
-        headers: {
-            "Content-Type": "application/json"
-        },
-        onload: function (response) {
-            const result = JSON.parse(response.response);
-            if (result.success == "false") {
+    // Check if URL is WebSocket
+    if (node_engine_url.startsWith('wss://') || node_engine_url.startsWith('ws://')) {
+        // Use WebSocket API for WebSocket URLs
+        Interface.log(`Connecting to WebSocket engine: ${node_engine_url}`);
+        
+        try {
+            const ws = new WebSocket(node_engine_url);
+            
+            ws.onopen = function() {
+                Interface.log('WebSocket connected, sending position...');
+                ws.send('ucinewgame');
+                ws.send(`position fen ${request.fen}`);
+                
+                if (engineMode == DEPTH_MODE) {
+                    ws.send(`go depth ${effectiveDepth}`);
+                    Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
+                } else {
+                    ws.send(`go movetime ${effectiveMovetime}`);
+                    Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
+                }
+            };
+            
+            let lastScore = 0;  // Track score from info lines
+            let achievedDepth = effectiveDepth;  // Track actual depth achieved
+            
+            ws.onmessage = function(event) {
+                const data = event.data;
+                Interface.engineLog(data);
+                
+                // Extract score and depth from info lines
+                if (data.startsWith('info') && data.includes('depth')) {
+                    const depthMatch = data.match(/depth (\d+)/);
+                    if (depthMatch) {
+                        achievedDepth = parseInt(depthMatch[1], 10);
+                    }
+                    
+                    // Extract centipawn score
+                    const cpMatch = data.match(/score cp (-?\d+)/);
+                    if (cpMatch) {
+                        lastScore = parseInt(cpMatch[1], 10);
+                    }
+                    
+                    // Extract mate score
+                    const mateMatch = data.match(/score mate (-?\d+)/);
+                    if (mateMatch) {
+                        const mateIn = parseInt(mateMatch[1], 10);
+                        lastScore = mateIn > 0 ? MATE_SCORE : -MATE_SCORE;
+                    }
+                }
+                
+                if (data.startsWith('bestmove ')) {
+                    // Check if position changed
+                    const FenUtil = new FenUtils();
+                    const currentFen = FenUtil.getFen();
+                    if (currentFen !== request.fen) {
+                        Interface.log('Position changed, discarding WebSocket analysis');
+                        ws.close();
+                        return;
+                    }
+                    
+                    // Check request ID
+                    if (lastBestMoveID != request.id) {
+                        Interface.log('Ignoring stale WebSocket response (request ID mismatch)');
+                        ws.close();
+                        return;
+                    }
+                    
+                    const parts = data.split(' ');
+                    if (parts.length < 2 || parts[1] === '(none)') {
+                        Interface.log('No legal moves available (checkmate or stalemate)');
+                        forcedBestMove = false;
+                        Gui.document.querySelector('#bestmove-btn').disabled = false;
+                        ws.close();
+                        return;
+                    }
+                    
+                    const move = parts[1];
+                    Interface.log(`WebSocket analysis complete: move ${move}, depth ${achievedDepth}, score ${lastScore}`);
+                    
+                    Gui.document.querySelector('#bestmove-btn').disabled = false;
+                    
+                    possible_moves = [];
+                    moveResult(move.slice(0, 2), move.slice(2, 4), lastScore, true, achievedDepth);
+                    
+                    ws.close();
+                }
+            };
+            
+            ws.onerror = function(error) {
                 forcedBestMove = false;
                 Gui.document.querySelector('#bestmove-btn').disabled = false;
-                return Interface.log("Error: " + result.data);
-            }
-
-            // Check if response is stale - verify position hasn't changed
-            const FenUtil = new FenUtils();
-            const currentFen = FenUtil.getFen();
-            if (currentFen !== request.fen) {
-                Interface.log('Position changed, discarding Node Server analysis');
-                return;
-            }
+                Interface.log("WebSocket error - check engine URL!");
+                ws.close();
+            };
             
-            // Also check request ID
-            if (lastBestMoveID != request.id) {
-                Interface.log('Ignoring stale response (request ID mismatch)');
-                return;
-            }
-
-            Interface.log('Received response from Node Server');
-
-            let data = result.data;
-            let server_fen = data.fen;
-            let depth = data.depth;
-            let movetime = data.movetime;
-            let power = data.score;
-            let move = data.bestMove;
-            let ponder = data.ponder
-
-            // Log the actual depth achieved vs requested
-            if (engineMode == DEPTH_MODE) {
-                Interface.updateBestMoveProgress(`Depth: ${depth}`);
-                Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
-            } else {
-                Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
-                Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
-            }
-
-            Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
-
-
-            possible_moves = [];
-            // Pass depth to moveResult for depth warning
-            moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
-        }, onerror: function (error) {
+            ws.onclose = function() {
+                Interface.log('WebSocket connection closed');
+            };
+        } catch (error) {
             forcedBestMove = false;
             Gui.document.querySelector('#bestmove-btn').disabled = false;
-            Interface.log("make sure node server is running !!");
+            Interface.log("WebSocket connection failed: " + error.message);
         }
-    });
+    } else {
+        // Use existing GM_xmlhttpRequest for HTTP URLs
+        // Add bullet_mode parameter to URL
+        const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
+        
+        // Calculate the correct turn for the engine: last_turn is who just moved,
+        // so the engine should analyze for the opposite color (whose turn is next)
+        const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
+        
+        // Construct full URL for logging and debugging
+        const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
+        Interface.log(`Node Server request URL: ${fullUrl}`);
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: fullUrl,
+            headers: {
+                "Content-Type": "application/json"
+            },
+            onload: function (response) {
+                const result = JSON.parse(response.response);
+                if (result.success == "false") {
+                    forcedBestMove = false;
+                    Gui.document.querySelector('#bestmove-btn').disabled = false;
+                    return Interface.log("Error: " + result.data);
+                }
+
+                // Check if response is stale - verify position hasn't changed
+                const FenUtil = new FenUtils();
+                const currentFen = FenUtil.getFen();
+                if (currentFen !== request.fen) {
+                    Interface.log('Position changed, discarding Node Server analysis');
+                    return;
+                }
+                
+                // Also check request ID
+                if (lastBestMoveID != request.id) {
+                    Interface.log('Ignoring stale response (request ID mismatch)');
+                    return;
+                }
+
+                Interface.log('Received response from Node Server');
+
+                let data = result.data;
+                let server_fen = data.fen;
+                let depth = data.depth;
+                let movetime = data.movetime;
+                let power = data.score;
+                let move = data.bestMove;
+                let ponder = data.ponder
+
+                // Log the actual depth achieved vs requested
+                if (engineMode == DEPTH_MODE) {
+                    Interface.updateBestMoveProgress(`Depth: ${depth}`);
+                    Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
+                } else {
+                    Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
+                    Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
+                }
+
+                Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
+
+
+                possible_moves = [];
+                // Pass depth to moveResult for depth warning
+                moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
+            }, onerror: function (error) {
+                forcedBestMove = false;
+                Gui.document.querySelector('#bestmove-btn').disabled = false;
+                Interface.log("make sure node server is running !!");
+            }
+        });
+    }
 
 }
 
