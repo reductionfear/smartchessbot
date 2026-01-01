@@ -51,6 +51,21 @@ To use the Node Server engine option:
 4. Select "Node Server" in the extension popup
 5. Configure the server URL (default: http://localhost:5000)
 
+### WebSocket Support
+
+The extension now supports WebSocket-based chess engines, such as those hosted on Hugging Face Spaces (Bettermint engines):
+
+1. Select "Node Server" in the extension popup
+2. Enter a WebSocket URL in the engine URL field (e.g., `wss://ProtonnDev-engine.hf.space/stockfish-11`)
+3. The extension will automatically detect the WebSocket protocol and connect accordingly
+
+#### Supported Bettermint Engines:
+- `wss://ProtonnDev-engine.hf.space/stockfish-11` - Stockfish 11
+- `wss://ProtonnDev-engine.hf.space/rodent3-fischer` - Rodent III (Fischer personality)
+- `wss://ProtonnDev-engine.hf.space/maia-1500` - Maia 1500 (human-like engine)
+
+**Note**: WebSocket engines use the UCI protocol. The extension sends standard UCI commands (`ucinewgame`, `position fen`, `go depth/movetime`) and parses the engine's responses to extract the best move and evaluation.
+
 ## Note
 
 This extension is for educational purposes only. Use responsibly.
