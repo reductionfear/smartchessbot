@@ -420,11 +420,23 @@ function getNodeBestMoves(request) {
     if (node_engine_url.startsWith('wss://') || node_engine_url.startsWith('ws://')) {
         try {
             const ws = new WebSocket(node_engine_url);
+            
+            // Detect chesshook-intermediary by checking for /ws in the URL path
+            const isChesshookIntermediary = node_engine_url.includes('/ws');
+            let subscribed = false;
+            
             ws.onopen = () => {
-                ws.send('ucinewgame');
-                ws.send(`position fen ${request.fen}`);
-                if (engineMode == DEPTH_MODE) ws.send(`go depth ${effectiveDepth}`);
-                else ws.send(`go movetime ${effectiveMovetime}`);
+                if (isChesshookIntermediary) {
+                    // chesshook-intermediary protocol: send 'sub' first
+                    Interface.log('Detected chesshook-intermediary, subscribing...');
+                    ws.send('sub');
+                } else {
+                    // Bettermint protocol: send UCI commands directly
+                    ws.send('ucinewgame');
+                    ws.send(`position fen ${request.fen}`);
+                    if (engineMode == DEPTH_MODE) ws.send(`go depth ${effectiveDepth}`);
+                    else ws.send(`go movetime ${effectiveMovetime}`);
+                }
             };
 
             let lastScore = 0;
@@ -432,6 +444,27 @@ function getNodeBestMoves(request) {
 
             ws.onmessage = (event) => {
                 const data = event.data;
+                
+                // Handle chesshook-intermediary subscription responses
+                if (isChesshookIntermediary && !subscribed) {
+                    if (data === 'subok') {
+                        Interface.log('Subscribed to chesshook-intermediary');
+                        subscribed = true;
+                        // Now send UCI commands
+                        ws.send('ucinewgame');
+                        ws.send(`position fen ${request.fen}`);
+                        if (engineMode == DEPTH_MODE) ws.send(`go depth ${effectiveDepth}`);
+                        else ws.send(`go movetime ${effectiveMovetime}`);
+                        return;
+                    }
+                    
+                    if (data === 'autherr') {
+                        Interface.log('Authentication required - check passkey in chesshook-intermediary');
+                        ws.close();
+                        return;
+                    }
+                }
+                
                 if (data.includes('score cp')) {
                     const cpMatch = data.match(/score cp (-?\d+)/);
                     if (cpMatch) lastScore = parseInt(cpMatch[1], 10);
