@@ -505,9 +505,7 @@ function getNodeBestMoves(request) {
                     if (parts.length < 2 || parts[1] === '(none)') {
                         Interface.log('No legal moves available (checkmate or stalemate)');
                         forcedBestMove = false;
-                        if (Gui?.document) {
-                            Gui.document.querySelector('#bestmove-btn').disabled = false;
-                        }
+                        Gui.document.querySelector('#bestmove-btn').disabled = false;
                         ws.close();
                         return;
                     }
@@ -515,9 +513,7 @@ function getNodeBestMoves(request) {
                     const move = parts[1];
                     Interface.log(`WebSocket analysis complete: move ${move}, depth ${achievedDepth}, score ${lastScore}`);
                     
-                    if (Gui?.document) {
-                        Gui.document.querySelector('#bestmove-btn').disabled = false;
-                    }
+                    Gui.document.querySelector('#bestmove-btn').disabled = false;
                     
                     possible_moves = [];
                     moveResult(move.slice(0, 2), move.slice(2, 4), lastScore, true, achievedDepth);
@@ -528,9 +524,7 @@ function getNodeBestMoves(request) {
             
             ws.onerror = function(error) {
                 forcedBestMove = false;
-                if (Gui?.document) {
-                    Gui.document.querySelector('#bestmove-btn').disabled = false;
-                }
+                Gui.document.querySelector('#bestmove-btn').disabled = false;
                 Interface.log("WebSocket error - check engine URL!");
                 ws.close();
             };
@@ -540,9 +534,7 @@ function getNodeBestMoves(request) {
             };
         } catch (error) {
             forcedBestMove = false;
-            if (Gui?.document) {
-                Gui.document.querySelector('#bestmove-btn').disabled = false;
-            }
+            Gui.document.querySelector('#bestmove-btn').disabled = false;
             Interface.log("WebSocket connection failed: " + error.message);
         }
     } else {
