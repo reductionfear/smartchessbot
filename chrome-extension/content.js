@@ -264,59 +264,21 @@ window.addEventListener('load', function() {
 
 
 function moveResult(from, to, power, clear = true, depth = null) {
-    if (from.length < 2 || to.length < 2) {
-        return;
-    }
+    if (!from || !to || from.length < 2 || to.length < 2) return;
 
-    if (clear) {
-        clearBoard(true); // Force clear for new move result
-    }
+    // Clear old highlights immediately before drawing new ones
+    removeSiteMoveMarkings();
 
-    lastHighlightedFen = lastFen;
+    lastHighlightedFen = new FenUtils().getFen();
     lastHighlightTime = Date.now();
 
-    if (!forcedBestMove) {
-        if (isPlayerTurn)
-            myScore = myScore + Number(power);
-        else
-            enemyScore = enemyScore + Number(power);
+    const color = hexToRgb(bestMoveColors[0] || "#00ff00");
+    
+    // Draw the actual move
+    markMoveToSite(from, to, color);
 
-        Interface.boardUtils.updateBoardPower(myScore, enemyScore);
-    } else {
-        forcedBestMove = false;
-    }
-
-    if (depth !== null && Number(depth) < MIN_DEPTH_THRESHOLD) {
-        Interface.log(`⚠️ Warning: Analysis depth only ${depth}, results may be unreliable`);
-    }
-
-    const color = hexToRgb(bestMoveColors[0]);
-    Interface.boardUtils.markMove(from, to, color);
-
-
-    for (let a = 0; a < possible_moves.length; a++) {
-        const color = hexToRgb(bestMoveColors[a]);
-        Interface.boardUtils.markMove(possible_moves[a].slice(0, 2), possible_moves[a].slice(2, 4), color);
-    }
-
-    // Send analysis result to popup
-    const move = from + to;
-    try {
-        chrome.runtime.sendMessage({
-            type: 'analysisComplete',
-            move: move,
-            depth: depth,
-            score: power
-        });
-    } catch (e) {
-        // Expected when popup is not open - chrome.runtime.lastError is set
-        // Only log unexpected errors
-        if (e.message && !e.message.includes('receiving end does not exist')) {
-            console.warn('[SmartChessBot] Error sending message to popup:', e.message);
-        }
-    }
-
-    Interface.stopBestMoveProcessingAnimation();
+    // Update UI
+    Interface.updateBestMoveProgress(`Depth ${depth || '?'}: ${from}${to}`);
 }
 
 function hexToRgb(hex) {
@@ -455,163 +417,61 @@ function getNodeBestMoves(request) {
     const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
     const effectiveMovetime = bullet_mode ? bullet_movetime : current_movetime;
     
-    // Check if URL is WebSocket
     if (node_engine_url.startsWith('wss://') || node_engine_url.startsWith('ws://')) {
-        // Use WebSocket API for WebSocket URLs
-        Interface.log(`Connecting to WebSocket engine: ${node_engine_url}`);
-        
         try {
             const ws = new WebSocket(node_engine_url);
-            
-            ws.onopen = function() {
-                Interface.log('WebSocket connected, sending position...');
+            ws.onopen = () => {
                 ws.send('ucinewgame');
                 ws.send(`position fen ${request.fen}`);
-                
-                if (engineMode == DEPTH_MODE) {
-                    ws.send(`go depth ${effectiveDepth}`);
-                    Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
-                } else {
-                    ws.send(`go movetime ${effectiveMovetime}`);
-                    Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
-                }
+                if (engineMode == DEPTH_MODE) ws.send(`go depth ${effectiveDepth}`);
+                else ws.send(`go movetime ${effectiveMovetime}`);
             };
-            
-            let lastScore = 0;  // Track score from info lines
-            let achievedDepth = effectiveDepth;  // Track actual depth achieved
-            
-            ws.onmessage = function(event) {
+
+            let lastScore = 0;
+            let achievedDepth = effectiveDepth;
+
+            ws.onmessage = (event) => {
                 const data = event.data;
-                Interface.engineLog(data);
-                
-                // Extract score and depth from info lines
-                if (data.startsWith('info') && data.includes('depth')) {
-                    const depthMatch = data.match(/depth (\d+)/);
-                    if (depthMatch) {
-                        achievedDepth = parseInt(depthMatch[1], 10);
-                    }
-                    
-                    // Extract centipawn score
+                if (data.includes('score cp')) {
                     const cpMatch = data.match(/score cp (-?\d+)/);
-                    if (cpMatch) {
-                        lastScore = parseInt(cpMatch[1], 10);
-                    }
-                    
-                    // Extract mate score
-                    const mateMatch = data.match(/score mate (-?\d+)/);
-                    if (mateMatch) {
-                        const mateIn = parseInt(mateMatch[1], 10);
-                        lastScore = mateIn > 0 ? MATE_SCORE : -MATE_SCORE;
-                    }
+                    if (cpMatch) lastScore = parseInt(cpMatch[1], 10);
                 }
-                
+
                 if (data.startsWith('bestmove ')) {
-                    // Check if position changed
                     const FenUtil = new FenUtils();
                     const currentFen = FenUtil.getFen();
-                    if (currentFen !== request.fen) {
-                        Interface.log('Position changed, discarding WebSocket analysis');
+                    
+                    // SMART CHECK: Only compare the piece positions (first part of FEN)
+                    const currentBoard = currentFen.split(' ')[0];
+                    const requestedBoard = request.fen.split(' ')[0];
+
+                    if (lastBestMoveID != request.id || currentBoard !== requestedBoard) {
+                        Interface.log('Discarding stale move - Board moved since request');
                         ws.close();
                         return;
                     }
-                    
-                    // Check request ID
-                    if (lastBestMoveID != request.id) {
-                        Interface.log('Ignoring stale WebSocket response (request ID mismatch)');
-                        ws.close();
-                        return;
+
+                    const move = data.split(' ')[1];
+                    if (move && move !== '(none)') {
+                        moveResult(move.slice(0, 2), move.slice(2, 4), lastScore, true, achievedDepth);
                     }
-                    
-                    const parts = data.split(' ');
-                    if (parts.length < 2 || parts[1] === '(none)') {
-                        Interface.log('No legal moves available (checkmate or stalemate)');
-                        forcedBestMove = false;
-                        ws.close();
-                        return;
-                    }
-                    
-                    const move = parts[1];
-                    Interface.log(`WebSocket analysis complete: move ${move}, depth ${achievedDepth}, score ${lastScore}`);
-                    
-                    possible_moves = [];
-                    moveResult(move.slice(0, 2), move.slice(2, 4), lastScore, true, achievedDepth);
-                    
                     ws.close();
                 }
             };
-            
-            ws.onerror = function(error) {
-                forcedBestMove = false;
-                Interface.log("WebSocket error - check engine URL!");
-                ws.close();
-            };
-            
-            ws.onclose = function() {
-                Interface.log('WebSocket connection closed');
-            };
-        } catch (error) {
-            forcedBestMove = false;
-            Interface.log("WebSocket connection failed: " + error.message);
-        }
+            ws.onerror = () => ws.close();
+        } catch (e) { Interface.log("WS Error"); }
     } else {
-        // Use existing Fetch API for HTTP URLs
-        const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
-        const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
-        
-        const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
-        Interface.log(`Node Server request URL: ${fullUrl}`);
-
-        fetch(fullUrl, {
-            method: "GET",
-            headers: {
-                "Content-Type": "application/json"
-            }
-        })
-        .then(response => response.json())
-        .then(result => {
-            if (result.success == "false") {
-                forcedBestMove = false;
-                return Interface.log("Error: " + result.data);
-            }
-
+        // HTTP Path
+        fetch(node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&depth=" + effectiveDepth)
+        .then(r => r.json()).then(result => {
             const FenUtil = new FenUtils();
-            const currentFen = FenUtil.getFen();
-            if (currentFen !== request.fen) {
-                Interface.log('Position changed, discarding Node Server analysis');
-                return;
+            const currentBoard = FenUtil.getFen().split(' ')[0];
+            const requestedBoard = request.fen.split(' ')[0];
+
+            if (lastBestMoveID == request.id && currentBoard === requestedBoard) {
+                let d = result.data;
+                moveResult(d.bestMove.slice(0, 2), d.bestMove.slice(2, 4), d.score, true, d.depth);
             }
-            
-            if (lastBestMoveID != request.id) {
-                Interface.log('Ignoring stale response (request ID mismatch)');
-                return;
-            }
-
-            Interface.log('Received response from Node Server');
-
-            let data = result.data;
-            let depth = data.depth;
-            let movetime = data.movetime;
-            let power = data.score;
-            let move = data.bestMove;
-            let ponder = data.ponder;
-
-            if (engineMode == DEPTH_MODE) {
-                Interface.updateBestMoveProgress(`Depth: ${depth}`);
-                Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
-            } else {
-                Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
-                Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
-            }
-
-            Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
-
-
-            possible_moves = [];
-            moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
-        })
-        .catch(error => {
-            forcedBestMove = false;
-            Interface.log("make sure node server is running !!");
         });
     }
 }
@@ -1146,55 +1006,20 @@ function refreshHighlights() {
 
 
 
-function updateBestMove(mutationArr) {
+function updateBestMove() {
     const FenUtil = new FenUtils();
     let currentFen = FenUtil.getFen();
 
+    // Prevent double-logging for the same FEN
+    if (currentFen === lastFen) return;
+    
+    Interface.log(`Position changed, analyzing new position...`);
+    lastFen = currentFen;
 
-    if (currentFen != lastFen) {
-        Interface.log(`Position changed, analyzing new position...`);
-        
-        lastFen = currentFen;
-        
-        if (lastHighlightedFen && currentFen !== lastHighlightedFen) {
-            clearBoard();
-            lastHighlightedFen = null;
-        } else if (currentFen === lastHighlightedFen) {
-            Interface.log(`Highlights already correct for current position, skipping analysis`);
-            return;
-        }
-
-
-        if (mutationArr) {
-            let attributeMutationArr
-
-            if (CURRENT_SITE == CHESS_COM) {
-                attributeMutationArr = mutationArr.filter(m => m.target.classList.contains('piece') && m.attributeName == 'class');
-            } else if (CURRENT_SITE == LICHESS_ORG) {
-                attributeMutationArr = mutationArr.filter(m => m.target.tagName == 'PIECE' && !m.target.classList.contains('fading') && m.attributeName == 'class');
-            }
-
-
-
-            if (attributeMutationArr?.length) {
-                const movedPieceColor = FenUtil.getPieceColor(FenUtil.getFenCodeFromPieceElem(attributeMutationArr[0].target));
-
-                last_turn = movedPieceColor;
-
-                turn = movedPieceColor === 'w' ? 'b' : 'w';
-
-
-
-                Interface.log(`Turn updated to ${turn}!`);
-
-                updateBoard(false);
-                sendBestMove();
-            }
-        } else {
-            updateBoard(false);
-            sendBestMove();
-        }
-    }
+    // Check if it's actually our turn before sending
+    // (This prevents analyzing opponent moves if 'show_opposite_moves' is off)
+    updateBoard(true);
+    sendBestMove();
 }
 
 
@@ -1203,9 +1028,22 @@ function updateBestMove(mutationArr) {
 
 
 function sendBestMove() {
-    Interface.log(`sendBestMove: isPlayerTurn=${isPlayerTurn}, playerColor=${playerColor}, last_turn=${last_turn}`);
+    // If we don't know the player color yet, try to find it
+    if (!playerColor) {
+        updatePlayerColor(() => {});
+    }
+
+    // Determine if it's our turn based on FEN turn flag vs our assigned color
+    const FenUtil = new FenUtils();
+    const fen = FenUtil.getFen();
+    const sideToMove = fen.split(' ')[1]; // 'w' or 'b'
+    
+    isPlayerTurn = (sideToMove === playerColor);
+
+    Interface.log(`Check: MyColor=${playerColor}, SideToMove=${sideToMove}, isPlayerTurn=${isPlayerTurn}`);
+
     if (!isPlayerTurn && !show_opposite_moves) {
-        Interface.log('Skipping analysis - not player turn');
+        Interface.log('Skipping analysis: Waiting for opponent move.');
         return;
     }
 
@@ -1388,76 +1226,55 @@ async function getBestMoves(request) {
 
 
 let mutationDebounceTimeout = null;
-const MUTATION_DEBOUNCE_MS = 0;
+const MUTATION_DEBOUNCE_MS = 100;
 
 // Track last processed FEN to avoid reacting to DOM noise
 let lastProcessedFen = null;
 
 function observeNewMoves() {
     const handleMutation = (mutationArr) => {
-        // Early FEN check - only process if position actually changed
-        const FenUtil = new FenUtils();
-        const currentFen = FenUtil.getFen();
-        
-        // If FEN hasn't changed, this is just DOM noise (hover, click, drag, animation)
-        if (currentFen === lastProcessedFen) {
-            return; // Ignore DOM noise
-        }
-        
+        // FILTER: Ignore mutations caused by our own highlights or UI changes
         const significantMutations = mutationArr.filter(m => {
-            const classList = m.target.classList;
-            if (!classList) {
-                return true;
-            }
+            const target = m.target;
+            if (!target || !target.classList) return false;
             
-            if (classList.contains('highlight')) {
-                return false;
-            }
-            if (classList.contains('custom')) {
-                return false;
-            }
-            if (classList.contains('ghost')) {
-                return false;
-            }
-            if (classList.contains('fading')) {
-                return false;
-            }
-            if (classList.contains('dragging')) {
-                return false;
-            }
-            if (m.attributeName === 'style' && m.target.tagName !== 'PIECE' && !classList.contains('piece')) {
-                return false;
-            }
-            return true;
+            const classList = target.classList;
+            // Ignore our custom highlights
+            if (classList.contains('custom') || classList.contains('highlight')) return false;
+            // Ignore dragging/ghost pieces
+            if (classList.contains('dragging') || classList.contains('ghost') || classList.contains('fading')) return false;
+            // Only care about pieces or board changes
+            if (target.tagName === 'PIECE' || classList.contains('piece') || target.tagName === 'SQUARE') return true;
+            
+            return false;
         });
 
-        if (significantMutations.length === 0) {
-            return;
-        }
+        if (significantMutations.length === 0) return;
 
-        // Update processed FEN before processing
-        lastProcessedFen = currentFen;
-
-        if (mutationDebounceTimeout) {
-            clearTimeout(mutationDebounceTimeout);
-        }
+        if (mutationDebounceTimeout) clearTimeout(mutationDebounceTimeout);
 
         mutationDebounceTimeout = setTimeout(() => {
-            lastPlayerColor = playerColor;
+            const FenUtil = new FenUtils();
+            const currentFen = FenUtil.getFen();
 
-            updatePlayerColor(() => {
-                if (playerColor != lastPlayerColor) {
-                    Interface.log(`Player color changed from ${lastPlayerColor} to ${playerColor}!`);
+            // Only trigger if the FEN is actually different from the last one we processed
+            if (currentFen !== lastProcessedFen) {
+                lastProcessedFen = currentFen;
+                
+                updatePlayerColor(() => {
                     updateBestMove();
-                } else {
-                    updateBestMove(significantMutations);
-                }
-            });
+                });
+            }
         }, MUTATION_DEBOUNCE_MS);
     };
 
     const boardObserver = new MutationObserver(handleMutation);
-    boardObserver.observe(chessBoardElem, { childList: true, subtree: true, attributes: true });
+    boardObserver.observe(chessBoardElem, { 
+        childList: true, 
+        subtree: true, 
+        attributes: true, 
+        attributeFilter: ['class', 'style', 'cgkey'] 
+    });
 }
 
 
