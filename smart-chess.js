@@ -442,9 +442,24 @@ function getNodeBestMoves(request) {
         try {
             const ws = new WebSocket(node_engine_url);
             
-            // Detect chesshook-intermediary by checking for /ws in the URL path
-            const isChesshookIntermediary = node_engine_url.includes('/ws');
+            // Detect chesshook-intermediary by checking if URL ends with /ws
+            const isChesshookIntermediary = node_engine_url.endsWith('/ws') || 
+                                           node_engine_url.includes('/ws?');
             let subscribed = false;
+            
+            // Helper function to send UCI commands
+            const sendUCICommands = () => {
+                ws.send('ucinewgame');
+                ws.send(`position fen ${request.fen}`);
+                
+                if (engineMode == DEPTH_MODE) {
+                    ws.send(`go depth ${effectiveDepth}`);
+                    Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
+                } else {
+                    ws.send(`go movetime ${effectiveMovetime}`);
+                    Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
+                }
+            };
             
             ws.onopen = function() {
                 if (isChesshookIntermediary) {
@@ -454,16 +469,7 @@ function getNodeBestMoves(request) {
                 } else {
                     // Bettermint protocol: send UCI commands directly
                     Interface.log('WebSocket connected, sending position...');
-                    ws.send('ucinewgame');
-                    ws.send(`position fen ${request.fen}`);
-                    
-                    if (engineMode == DEPTH_MODE) {
-                        ws.send(`go depth ${effectiveDepth}`);
-                        Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
-                    } else {
-                        ws.send(`go movetime ${effectiveMovetime}`);
-                        Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
-                    }
+                    sendUCICommands();
                 }
             };
             
@@ -480,16 +486,7 @@ function getNodeBestMoves(request) {
                         Interface.log('Subscribed to chesshook-intermediary');
                         subscribed = true;
                         // Now send UCI commands
-                        ws.send('ucinewgame');
-                        ws.send(`position fen ${request.fen}`);
-                        
-                        if (engineMode == DEPTH_MODE) {
-                            ws.send(`go depth ${effectiveDepth}`);
-                            Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
-                        } else {
-                            ws.send(`go movetime ${effectiveMovetime}`);
-                            Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
-                        }
+                        sendUCICommands();
                         return;
                     }
                     
