@@ -456,11 +456,35 @@ function getNodeBestMoves(request) {
                 }
             };
             
+            let lastScore = 0;  // Track score from info lines
+            let achievedDepth = effectiveDepth;  // Track actual depth achieved
+            
             ws.onmessage = function(event) {
                 const data = event.data;
                 Interface.engineLog(data);
                 
-                if (data.includes('bestmove')) {
+                // Extract score and depth from info lines
+                if (data.startsWith('info') && data.includes('depth')) {
+                    const depthMatch = data.match(/depth (\d+)/);
+                    if (depthMatch) {
+                        achievedDepth = parseInt(depthMatch[1], 10);
+                    }
+                    
+                    // Extract centipawn score
+                    const cpMatch = data.match(/score cp (-?\d+)/);
+                    if (cpMatch) {
+                        lastScore = parseInt(cpMatch[1], 10);
+                    }
+                    
+                    // Extract mate score
+                    const mateMatch = data.match(/score mate (-?\d+)/);
+                    if (mateMatch) {
+                        const mateIn = parseInt(mateMatch[1], 10);
+                        lastScore = mateIn > 0 ? MATE_SCORE : -MATE_SCORE;
+                    }
+                }
+                
+                if (data.startsWith('bestmove ')) {
                     // Check if position changed
                     const FenUtil = new FenUtils();
                     const currentFen = FenUtil.getFen();
@@ -477,15 +501,26 @@ function getNodeBestMoves(request) {
                         return;
                     }
                     
-                    const move = data.split(' ')[1];
-                    Interface.log(`WebSocket analysis complete: move ${move}`);
+                    const parts = data.split(' ');
+                    if (parts.length < 2 || parts[1] === '(none)') {
+                        Interface.log('No legal moves available (checkmate or stalemate)');
+                        forcedBestMove = false;
+                        if (Gui?.document) {
+                            Gui.document.querySelector('#bestmove-btn').disabled = false;
+                        }
+                        ws.close();
+                        return;
+                    }
+                    
+                    const move = parts[1];
+                    Interface.log(`WebSocket analysis complete: move ${move}, depth ${achievedDepth}, score ${lastScore}`);
                     
                     if (Gui?.document) {
                         Gui.document.querySelector('#bestmove-btn').disabled = false;
                     }
                     
                     possible_moves = [];
-                    moveResult(move.slice(0, 2), move.slice(2, 4), effectiveDepth, true, effectiveDepth);
+                    moveResult(move.slice(0, 2), move.slice(2, 4), lastScore, true, achievedDepth);
                     
                     ws.close();
                 }
