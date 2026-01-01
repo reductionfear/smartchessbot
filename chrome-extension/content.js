@@ -455,65 +455,133 @@ function getNodeBestMoves(request) {
     const effectiveDepth = bullet_mode ? Math.min(current_depth, bullet_depth) : current_depth;
     const effectiveMovetime = bullet_mode ? bullet_movetime : current_movetime;
     
-    const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
-    
-    const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
-    
-    const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
-    Interface.log(`Node Server request URL: ${fullUrl}`);
-
-    fetch(fullUrl, {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json"
-        }
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success == "false") {
-            forcedBestMove = false;
-            return Interface.log("Error: " + result.data);
-        }
-
-        const FenUtil = new FenUtils();
-        const currentFen = FenUtil.getFen();
-        if (currentFen !== request.fen) {
-            Interface.log('Position changed, discarding Node Server analysis');
-            return;
-        }
+    // Check if URL is WebSocket
+    if (node_engine_url.startsWith('wss://') || node_engine_url.startsWith('ws://')) {
+        // Use WebSocket API for WebSocket URLs
+        Interface.log(`Connecting to WebSocket engine: ${node_engine_url}`);
         
-        if (lastBestMoveID != request.id) {
-            Interface.log('Ignoring stale response (request ID mismatch)');
-            return;
+        try {
+            const ws = new WebSocket(node_engine_url);
+            
+            ws.onopen = function() {
+                Interface.log('WebSocket connected, sending position...');
+                ws.send('ucinewgame');
+                ws.send(`position fen ${request.fen}`);
+                
+                if (engineMode == DEPTH_MODE) {
+                    ws.send(`go depth ${effectiveDepth}`);
+                    Interface.updateBestMoveProgress(`Depth: ${effectiveDepth}`);
+                } else {
+                    ws.send(`go movetime ${effectiveMovetime}`);
+                    Interface.updateBestMoveProgress(`Move time: ${effectiveMovetime} ms`);
+                }
+            };
+            
+            ws.onmessage = function(event) {
+                const data = event.data;
+                Interface.engineLog(data);
+                
+                if (data.includes('bestmove')) {
+                    // Check if position changed
+                    const FenUtil = new FenUtils();
+                    const currentFen = FenUtil.getFen();
+                    if (currentFen !== request.fen) {
+                        Interface.log('Position changed, discarding WebSocket analysis');
+                        ws.close();
+                        return;
+                    }
+                    
+                    // Check request ID
+                    if (lastBestMoveID != request.id) {
+                        Interface.log('Ignoring stale WebSocket response (request ID mismatch)');
+                        ws.close();
+                        return;
+                    }
+                    
+                    const move = data.split(' ')[1];
+                    Interface.log(`WebSocket analysis complete: move ${move}`);
+                    
+                    possible_moves = [];
+                    moveResult(move.slice(0, 2), move.slice(2, 4), effectiveDepth, true, effectiveDepth);
+                    
+                    ws.close();
+                }
+            };
+            
+            ws.onerror = function(error) {
+                forcedBestMove = false;
+                Interface.log("WebSocket error - check engine URL!");
+                ws.close();
+            };
+            
+            ws.onclose = function() {
+                Interface.log('WebSocket connection closed');
+            };
+        } catch (error) {
+            forcedBestMove = false;
+            Interface.log("WebSocket connection failed: " + error.message);
         }
+    } else {
+        // Use existing Fetch API for HTTP URLs
+        const bulletParam = bullet_mode ? '&bullet_mode=true' : '';
+        const engineTurn = last_turn ? (last_turn === 'w' ? 'b' : 'w') : turn;
+        
+        const fullUrl = node_engine_url + "/getBestMove?fen=" + encodeURIComponent(request.fen) + "&engine_mode=" + engineMode + "&depth=" + effectiveDepth + "&movetime=" + effectiveMovetime + "&turn=" + engineTurn + "&engine_name=" + node_engine_name + bulletParam;
+        Interface.log(`Node Server request URL: ${fullUrl}`);
 
-        Interface.log('Received response from Node Server');
+        fetch(fullUrl, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json"
+            }
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success == "false") {
+                forcedBestMove = false;
+                return Interface.log("Error: " + result.data);
+            }
 
-        let data = result.data;
-        let depth = data.depth;
-        let movetime = data.movetime;
-        let power = data.score;
-        let move = data.bestMove;
-        let ponder = data.ponder;
+            const FenUtil = new FenUtils();
+            const currentFen = FenUtil.getFen();
+            if (currentFen !== request.fen) {
+                Interface.log('Position changed, discarding Node Server analysis');
+                return;
+            }
+            
+            if (lastBestMoveID != request.id) {
+                Interface.log('Ignoring stale response (request ID mismatch)');
+                return;
+            }
 
-        if (engineMode == DEPTH_MODE) {
-            Interface.updateBestMoveProgress(`Depth: ${depth}`);
-            Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
-        } else {
-            Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
-            Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
-        }
+            Interface.log('Received response from Node Server');
 
-        Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
+            let data = result.data;
+            let depth = data.depth;
+            let movetime = data.movetime;
+            let power = data.score;
+            let move = data.bestMove;
+            let ponder = data.ponder;
+
+            if (engineMode == DEPTH_MODE) {
+                Interface.updateBestMoveProgress(`Depth: ${depth}`);
+                Interface.log(`Analysis complete: requested depth ${effectiveDepth}, achieved depth ${depth}`);
+            } else {
+                Interface.updateBestMoveProgress(`Move time: ${movetime} ms`);
+                Interface.log(`Analysis complete: movetime ${movetime}ms, depth ${depth}`);
+            }
+
+            Interface.engineLog("bestmove " + move + " ponder " + ponder + " (depth " + depth + ", score " + power + ")");
 
 
-        possible_moves = [];
-        moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
-    })
-    .catch(error => {
-        forcedBestMove = false;
-        Interface.log("make sure node server is running !!");
-    });
+            possible_moves = [];
+            moveResult(move.slice(0, 2), move.slice(2, 4), power, true, depth);
+        })
+        .catch(error => {
+            forcedBestMove = false;
+            Interface.log("make sure node server is running !!");
+        });
+    }
 }
 
 function getElo() {
