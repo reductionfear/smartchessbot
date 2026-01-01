@@ -442,8 +442,13 @@ function getNodeBestMoves(request) {
         try {
             const ws = new WebSocket(node_engine_url);
             
-            ws.onopen = function() {
-                Interface.log('WebSocket connected, sending position...');
+            // Detect chesshook-intermediary by checking if URL ends with /ws
+            const isChesshookIntermediary = node_engine_url.endsWith('/ws') || 
+                                           node_engine_url.includes('/ws?');
+            let subscribed = false;
+            
+            // Helper function to send UCI commands
+            const sendUCICommands = () => {
                 ws.send('ucinewgame');
                 ws.send(`position fen ${request.fen}`);
                 
@@ -456,12 +461,43 @@ function getNodeBestMoves(request) {
                 }
             };
             
+            ws.onopen = function() {
+                if (isChesshookIntermediary) {
+                    // chesshook-intermediary protocol: send 'sub' first
+                    Interface.log('Detected chesshook-intermediary, subscribing...');
+                    ws.send('sub');
+                } else {
+                    // Bettermint protocol: send UCI commands directly
+                    Interface.log('WebSocket connected, sending position...');
+                    sendUCICommands();
+                }
+            };
+            
             let lastScore = 0;  // Track score from info lines
             let achievedDepth = effectiveDepth;  // Track actual depth achieved
             
             ws.onmessage = function(event) {
                 const data = event.data;
                 Interface.engineLog(data);
+                
+                // Handle chesshook-intermediary subscription responses
+                if (isChesshookIntermediary && !subscribed) {
+                    if (data === 'subok') {
+                        Interface.log('Subscribed to chesshook-intermediary');
+                        subscribed = true;
+                        // Now send UCI commands
+                        sendUCICommands();
+                        return;
+                    }
+                    
+                    if (data === 'autherr') {
+                        Interface.log('Authentication required - check passkey in chesshook-intermediary');
+                        forcedBestMove = false;
+                        Gui.document.querySelector('#bestmove-btn').disabled = false;
+                        ws.close();
+                        return;
+                    }
+                }
                 
                 // Extract score and depth from info lines
                 if (data.startsWith('info') && data.includes('depth')) {

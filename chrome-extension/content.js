@@ -420,11 +420,29 @@ function getNodeBestMoves(request) {
     if (node_engine_url.startsWith('wss://') || node_engine_url.startsWith('ws://')) {
         try {
             const ws = new WebSocket(node_engine_url);
-            ws.onopen = () => {
+            
+            // Detect chesshook-intermediary by checking if URL ends with /ws
+            const isChesshookIntermediary = node_engine_url.endsWith('/ws') || 
+                                           node_engine_url.includes('/ws?');
+            let subscribed = false;
+            
+            // Helper function to send UCI commands
+            const sendUCICommands = () => {
                 ws.send('ucinewgame');
                 ws.send(`position fen ${request.fen}`);
                 if (engineMode == DEPTH_MODE) ws.send(`go depth ${effectiveDepth}`);
                 else ws.send(`go movetime ${effectiveMovetime}`);
+            };
+            
+            ws.onopen = () => {
+                if (isChesshookIntermediary) {
+                    // chesshook-intermediary protocol: send 'sub' first
+                    Interface.log('Detected chesshook-intermediary, subscribing...');
+                    ws.send('sub');
+                } else {
+                    // Bettermint protocol: send UCI commands directly
+                    sendUCICommands();
+                }
             };
 
             let lastScore = 0;
@@ -432,6 +450,24 @@ function getNodeBestMoves(request) {
 
             ws.onmessage = (event) => {
                 const data = event.data;
+                
+                // Handle chesshook-intermediary subscription responses
+                if (isChesshookIntermediary && !subscribed) {
+                    if (data === 'subok') {
+                        Interface.log('Subscribed to chesshook-intermediary');
+                        subscribed = true;
+                        // Now send UCI commands
+                        sendUCICommands();
+                        return;
+                    }
+                    
+                    if (data === 'autherr') {
+                        Interface.log('Authentication required - check passkey in chesshook-intermediary');
+                        ws.close();
+                        return;
+                    }
+                }
+                
                 if (data.includes('score cp')) {
                     const cpMatch = data.match(/score cp (-?\d+)/);
                     if (cpMatch) lastScore = parseInt(cpMatch[1], 10);
